@@ -1,0 +1,14 @@
+services:
+  mush-map-editor:
+    build: .
+    image: mush-map-editor
+    container_name: mush-map-editor
+    restart: unless-stopped
+    # No published ports; the reverse proxy reaches this container by name on port 80.
+    expose:
+      - "80"
+
+networks:
+  default:
+    external: true
+    name: pangolin

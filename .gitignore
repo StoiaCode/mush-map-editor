@@ -4,3 +4,5 @@
 !README.md
 !LICENSE
 !.gitignore
+!Dockerfile
+!compose.yaml

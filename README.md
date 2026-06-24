@@ -21,6 +21,21 @@ and you can export or import it as JSON for backups.
   multi-select with bulk edits, search, shortest-path finder, and a stats panel.
 - Undo and redo, plus JSON export and import.
 
+## Self-hosting (Docker)
+
+The included `Dockerfile` serves the app with busybox httpd (a tiny ~1.5 MB base
+image). The `compose.yaml` publishes no ports and instead joins an external
+network named `pangolin`, so a reverse proxy on that network reaches the
+container by name on port 80. Adjust or remove the network block to suit your
+setup.
+
+```bash
+docker compose up -d --build
+```
+
+Maps are stored per browser via localStorage, so each visitor keeps their own
+data. Use the JSON export for backups.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
