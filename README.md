@@ -1,8 +1,7 @@
 # MUSH Map Editor
 
 A single-file web app for hand-documenting the layout of tile-based MUSHes that
-have multiple vertical levels. No build step, no server, no accounts. Everything
-runs from one HTML file and saves to your browser.
+have multiple vertical levels. Everything runs from one HTML file and saves to your browser.
 
 ## Usage
 
