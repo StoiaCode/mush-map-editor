@@ -1,0 +1,6 @@
+# Track only the project files; ignore everything else (editor/tooling artifacts, etc.)
+*
+!mush-map-editor.html
+!README.md
+!LICENSE
+!.gitignore

@@ -1,0 +1,1901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MUSH Map Editor</title>
+<!--
+  MUSH Map Editor
+  Copyright (c) 2026 Stoia
+  Released under the MIT License. See the LICENSE file for details.
+-->
+
+<style>
+  :root {
+    --bg: #14161c;
+    --panel: #1d2129;
+    --panel2: #262c37;
+    --line: #353d4a;
+    --text: #d8dde6;
+    --muted: #8a93a3;
+    --accent: #5b9dff;
+    --accent2: #3b6fc4;
+    --danger: #e25555;
+    --good: #46c46e;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    font-size: 13px;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* Top bar */
+  #topbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  #topbar .title { font-weight: 700; letter-spacing: .3px; margin-right: 6px; }
+  #topbar .spacer { flex: 1; }
+  button, select, input[type=text], textarea {
+    font-family: inherit; font-size: 12px;
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 5px 9px; cursor: pointer; outline: none;
+  }
+  button:hover { border-color: var(--accent2); }
+  button.active { background: var(--accent2); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button.danger:hover { background: var(--danger); color:#fff; border-color: var(--danger); }
+  button:disabled { opacity: .35; cursor: default; }
+  input[type=text], textarea { cursor: text; }
+  select { cursor: pointer; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: none; }
+
+  /* Main area */
+  #main { flex: 1; display: flex; min-height: 0; }
+  #viewport {
+    position: relative; flex: 1; overflow: hidden;
+    background: radial-gradient(circle at 50% 50%, #181b22, #0f1115);
+    cursor: grab;
+  }
+  #viewport.panning { cursor: grabbing; }
+  #viewport.linkmode { cursor: crosshair; }
+  #world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  #gridcanvas { position: absolute; top: 0; left: 0; }
+  #svglayer { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+
+  .room {
+    position: absolute; transform: translate(-50%, -50%);
+    border-radius: 8px; border: 2px solid rgba(255,255,255,.25);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; cursor: pointer; user-select: none;
+    box-shadow: 0 3px 8px rgba(0,0,0,.45);
+    overflow: visible; color: #11141a; font-weight: 600;
+  }
+  .room .rname {
+    padding: 2px 4px; line-height: 1.1; overflow: hidden;
+    text-overflow: ellipsis; max-width: 100%;
+    display: flex; align-items: center; justify-content: center; height: 100%; width:100%;
+  }
+  .room.selected { border-color: #fff; box-shadow: 0 0 0 3px var(--accent), 0 3px 10px rgba(0,0,0,.6); }
+  .room.linktarget { outline: 2px dashed var(--good); outline-offset: 2px; }
+  .room.linksource { outline: 3px solid var(--good); outline-offset: 2px; }
+  .room.searchhit { outline: 3px solid #f1c84a; outline-offset: 3px; }
+  .room.pathhit { box-shadow: 0 0 0 3px #e87cc4, 0 3px 10px rgba(0,0,0,.6); }
+  /* onion-skin ghost of the layer below */
+  .room.ghost {
+    opacity: .30; filter: saturate(.6); pointer-events: none;
+    box-shadow: none; border-style: dashed;
+  }
+  /* layer-above ghost: brighter dashed ring so it reads differently from below */
+  .room.ghost.above { border-style: dotted; border-color: #7fd0ff; filter: saturate(.6) brightness(1.1); }
+
+  .vbadge {
+    position: absolute; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 9px;
+    background: #11141a; color: #fff; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255,255,255,.55); cursor: pointer; z-index: 5; gap: 1px;
+  }
+  .vbadge:hover { background: var(--accent); }
+  .vbadge.up { top: -9px; right: -9px; }
+  .vbadge.down { bottom: -9px; right: -9px; }
+
+  .exitlabel {
+    font-size: 10px; fill: var(--muted); font-weight: 700;
+    paint-order: stroke; stroke: #0f1115; stroke-width: 3px;
+  }
+
+  /* Inspector */
+  #inspector {
+    width: 290px; background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  #inspector h3 { margin: 0; padding: 10px 12px; font-size: 12px;
+    text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+    border-bottom: 1px solid var(--line); }
+  .insec { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .field { margin-bottom: 9px; }
+  .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .field input[type=text], .field textarea, .field select { width: 100%; }
+  .field textarea { resize: vertical; min-height: 60px; }
+  .empty-note { padding: 16px 12px; color: var(--muted); line-height: 1.5; }
+  .seclabel { font-size:11px; color:var(--muted); display:block; margin-bottom:6px; }
+
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatch { width: 22px; height: 22px; border-radius: 5px; cursor: pointer; border: 2px solid transparent; }
+  .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+
+  /* Compass + vertical carve rose */
+  .rose { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .rose button { padding: 6px 0; font-size: 11px; }
+  .rose .center { display:flex; flex-direction:column; gap:3px; }
+  .rose .center button { padding: 3px 0; font-size: 10px; }
+  .ud-row { display:flex; gap:4px; margin-top:4px; }
+  .ud-row button { flex:1; padding:6px 0; }
+  .ud-row button.up { color: var(--good); }
+  .ud-row button.down { color: var(--accent); }
+
+  .exitrow { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid #232833; }
+  .exitrow .dir { font-weight: 700; width: 38px; color: var(--accent); }
+  .exitrow .tgt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .exitrow .tgt:hover { color: var(--accent); text-decoration: underline; }
+  .exitrow button { padding: 2px 6px; font-size: 11px; }
+
+  /* 3D view */
+  #canvas3d { flex: 1; min-width: 0; min-height: 0; display: none; cursor: grab; background:
+    radial-gradient(circle at 50% 40%, #181b22, #0e1014); }
+  #canvas3d.active { display: block; }
+  #canvas3d.dragging { cursor: grabbing; }
+
+  /* Popovers (legend, onion) */
+  .popover {
+    position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.6);
+    display: none; font-size: 12px; min-width: 200px;
+  }
+  .pop-hdr { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+  .popclose { padding: 1px 6px; font-size: 12px; }
+  .poprow { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .poprow input[type=range] { flex: 1; }
+  .legendrow { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+  .legendrow .sw { width: 20px; height: 20px; border-radius: 4px; flex: none; border: 1px solid rgba(255,255,255,.3); }
+  .legendrow input[type=text] { flex: 1; }
+  .legendrow .cnt { color: var(--muted); min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
+  #statsPanel { max-width: 280px; max-height: 72vh; overflow-y: auto; }
+  .statline { font-size: 12px; margin-bottom: 4px; }
+  .stathdr { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+    margin: 8px 0 3px; border-top: 1px solid var(--line); padding-top: 6px; }
+  .statrow { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; }
+  .statrow .val { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .statrow .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  /* marquee box-select rectangle (screen space) */
+  #marquee {
+    position: fixed; z-index: 80; display: none; pointer-events: none;
+    border: 1px solid var(--accent); background: rgba(91,157,255,.15);
+  }
+  #marquee.all { border: 1px dashed var(--good); background: rgba(70,196,110,.15); }
+  #marquee.areadraw { border: 2px dashed var(--accent); background: rgba(91,157,255,.12); }
+
+  /* Areas (zone annotation rectangles) */
+  .area { position: absolute; border: 2px solid; border-radius: 6px; pointer-events: none; }
+  .area-label {
+    position: absolute; top: 0; left: 0; font-size: 11px; font-weight: 700; color: #11141a;
+    padding: 1px 7px; border-radius: 6px 0 6px 0; max-width: 100%;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .area-resize {
+    position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px;
+    background: #fff; border: 1px solid #333; border-radius: 2px; cursor: nwse-resize; display: none;
+  }
+  .area.selected { box-shadow: 0 0 0 2px var(--accent); }
+  #viewport.areamode { cursor: crosshair; }
+  #viewport.areamode .area { pointer-events: auto; cursor: move; }
+  #viewport.areamode .room { pointer-events: none; }
+  #viewport.areamode .area-resize { display: block; }
+
+  /* Direction picker popup */
+  #dirpicker {
+    position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.6); display: none;
+  }
+  #dirpicker .hdr { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+  #dirpicker .grid3 { display: grid; grid-template-columns: repeat(3,46px); gap: 5px; }
+  #dirpicker button { padding: 8px 0; }
+
+  #searchBox { width: 150px; }
+  #pathResult {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.6); display: none;
+    max-width: 72%; z-index: 90; font-size: 12px;
+  }
+  #pathResult .pathdirs { margin: 6px 0; font-weight: 700; color: #e87cc4; line-height: 1.4; }
+  #pathResult button { margin-top: 4px; }
+  .hint { color: var(--muted); font-size: 11px; }
+  .statuschip { font-size: 11px; color: var(--muted); }
+  #zoomctl { display: inline-flex; align-items: center; gap: 4px; }
+  .iconbtn { width: 28px; padding: 5px 0; text-align: center; }
+  #layerLabel { min-width: 64px; text-align: center; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <span class="title">🗺️ MUSH Map Editor</span>
+
+    <div class="seg" id="viewseg">
+      <button data-view="flat" class="active">Flat</button>
+      <button data-view="3d">3D</button>
+    </div>
+
+    <span id="layerctl">
+      <button class="iconbtn" id="layerDown" title="Go down a layer">▼</button>
+      <span id="layerLabel">Layer 0</span>
+      <button class="iconbtn" id="layerUp" title="Go up a layer">▲</button>
+    </span>
+
+    <span class="seg">
+      <button class="iconbtn" id="undoBtn" title="Undo (Ctrl+Z)">↶</button>
+      <button class="iconbtn" id="redoBtn" title="Redo (Ctrl+Y)">↷</button>
+    </span>
+
+    <button id="linkBtn" title="Link mode: click a room, change layers if needed, then click the target. (Shift-drag links rooms on the same layer.)">🔗 Link</button>
+    <button id="pathBtn" title="Pathfinder: click the start room, then the destination. Shows the shortest route as directions.">🧭 Path</button>
+    <button id="areaBtn" title="Area mode: drag empty space to draw a zone rectangle. Spans all layers. Click an area to move/resize/edit it.">▭ Area</button>
+    <button id="legendBtn" title="Color-tag legend: name what each colour means.">🏷 Legend</button>
+    <button id="onionBtn" title="Onion-skin: show neighbour layers ghosted through.">👁 Onion</button>
+    <button id="statsBtn" title="Map statistics: room counts by layer, colour and area.">📊 Stats</button>
+    <input type="text" id="searchBox" placeholder="🔍 Search rooms…">
+    <span id="searchInfo" class="statuschip"></span>
+    <span id="linkHint" class="statuschip" style="display:none;color:var(--good)"></span>
+
+    <span id="zoomctl">
+      <button class="iconbtn" id="zoomOut">−</button>
+      <span class="statuschip" id="zoomLabel">100%</span>
+      <button class="iconbtn" id="zoomIn">+</button>
+      <button id="zoomReset" title="Reset view">Reset</button>
+    </span>
+
+    <span class="spacer"></span>
+    <span class="statuschip" id="saveStatus"></span>
+    <button id="exportBtn">⬇ Export</button>
+    <button id="importBtn">⬆ Import</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+    <button id="newMapBtn" class="danger">New</button>
+  </div>
+
+  <div id="main">
+    <div id="viewport">
+      <canvas id="gridcanvas"></canvas>
+      <div id="world">
+        <svg id="svglayer"></svg>
+        <!-- rooms injected here -->
+      </div>
+    </div>
+
+    <canvas id="canvas3d"></canvas>
+
+    <div id="inspector"></div>
+  </div>
+</div>
+
+<div id="dirpicker">
+  <div class="hdr" id="dirHdr">Link direction</div>
+  <div class="grid3" id="dirGrid"></div>
+</div>
+
+<div id="pathResult"></div>
+
+<div id="legendPanel" class="popover">
+  <div class="pop-hdr">Colour tags <button class="popclose" data-close="legendPanel">✕</button></div>
+  <div id="legendRows"></div>
+</div>
+
+<div id="onionPanel" class="popover">
+  <div class="pop-hdr">Onion-skin <button class="popclose" data-close="onionPanel">✕</button></div>
+  <label class="poprow"><input type="checkbox" id="onionBelow"> Show layer below</label>
+  <label class="poprow"><input type="checkbox" id="onionAbove"> Show layer above</label>
+  <label class="poprow">Opacity <input type="range" id="onionOpacity" min="0.1" max="0.6" step="0.05"></label>
+</div>
+
+<div id="statsPanel" class="popover">
+  <div class="pop-hdr">Map stats <button class="popclose" data-close="statsPanel">✕</button></div>
+  <div id="statsBody"></div>
+</div>
+
+<div id="marquee"></div>
+
+<script>
+"use strict";
+
+// ---------- Constants ----------
+const CELL = 90;
+const GRID_N = 100;                 // 100 x 100 cells per layer
+const WORLD = CELL * GRID_N;
+const LAYER_GAP = 140;              // vertical spacing between layers in the 3D view
+const SIZE_PX = { small: 46, medium: 62, large: 82 };
+const DIRS = ["N","NE","E","SE","S","SW","W","NW","UP","DOWN"];
+const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
+const VEC = {
+  N:[0,-1], NE:[1,-1], E:[1,0], SE:[1,1],
+  S:[0,1], SW:[-1,1], W:[-1,0], NW:[-1,-1]
+};
+const OPP = { N:"S", S:"N", E:"W", W:"E", NE:"SW", SW:"NE", NW:"SE", SE:"NW", UP:"DOWN", DOWN:"UP" };
+const PALETTE = [
+  { name:"Slate",  c:"#9aa6b8" },
+  { name:"Red",    c:"#e25555" },
+  { name:"Orange", c:"#e8943a" },
+  { name:"Yellow", c:"#e8c93a" },
+  { name:"Green",  c:"#5ec46e" },
+  { name:"Teal",   c:"#3cc4b8" },
+  { name:"Blue",   c:"#5b9dff" },
+  { name:"Purple", c:"#a87ce8" },
+  { name:"Pink",   c:"#e87cc4" }
+];
+const STORE_KEY = "mushMapEditor.v2";
+const PREFS_KEY = "mushMapEditor.prefs.v1";
+function emptyTagLabels() { const o = {}; for (const p of PALETTE) o[p.name] = ""; return o; }
+
+// ---------- State ----------
+// Room: { id, name, description, color, size, x, y, z, exits:{dir:targetId} }
+//   z = layer (true vertical axis). UP carve => same (x,y), z+1. DOWN => z-1.
+let map = null;            // { version:2, rooms:{}, currentLayer }
+let selectedId = null;
+let view = "flat";
+let linkMode = false;
+let pendingLink = null;    // source room id while picking a cross-layer link target
+let pathMode = false;
+let pathStart = null;      // start room id while picking a path destination
+let areaMode = false;      // drawing/editing zone rectangles
+let selectedAreaId = null; // currently selected area (separate from room selection)
+let pathRooms = new Set(); // rooms on the current shortest-path result (highlighted)
+let searchTerm = "";
+let searchMatches = [];    // ids of rooms matching the search
+let searchIdx = -1;        // cursor for "jump to next match"
+let selection = new Set(); // multi-selection; when non-empty, selectedId is the primary member
+let scale = 1, panX = 0, panY = 0;
+let drag = null;
+
+// 3D view camera (orbit). dist is perspective focal distance; cx/cy centre the projection.
+let cam3d = { yaw: 0.7, pitch: 0.5, dist: 1400, cx: 0, cy: 0, fitted: false };
+let drag3d = null;
+
+// undo/redo: snapshots of the whole map (plain JSON-serialisable data)
+let history = [];
+let histIdx = -1;
+const HIST_MAX = 60;
+
+// view-only preferences (persisted separately from the map so they don't bloat exports)
+let onion = { below: true, above: false, opacity: 0.30 };
+
+// ---------- DOM ----------
+const viewport = document.getElementById("viewport");
+const world = document.getElementById("world");
+const svg = document.getElementById("svglayer");
+const gridCanvas = document.getElementById("gridcanvas");
+const ctx = gridCanvas.getContext("2d");
+const inspector = document.getElementById("inspector");
+const view3dEl = document.getElementById("canvas3d");
+const ctx3d = view3dEl.getContext("2d");
+const layerLabel = document.getElementById("layerLabel");
+const zoomLabel = document.getElementById("zoomLabel");
+const saveStatus = document.getElementById("saveStatus");
+const dirpicker = document.getElementById("dirpicker");
+const dirGrid = document.getElementById("dirGrid");
+
+// ---------- Utilities ----------
+function uid() { return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function colorOf(room) { return (PALETTE.find(p => p.name === room.color) || PALETTE[0]).c; }
+function areaHex(ar) { return (PALETTE.find(p => p.name === ar.color) || PALETTE[5]).c; }
+function hexA(hex, a) { const n = parseInt(hex.replace("#",""), 16); return `rgba(${(n>>16)&255}, ${(n>>8)&255}, ${n&255}, ${a})`; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c])); }
+function escapeAttr(s) { return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+
+// ---------- Persistence ----------
+function defaultMap() { return { version: 2, rooms: {}, areas: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
+let saveTimer = null;
+function save() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveStatus.textContent = "saving…";
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(map));
+      saveStatus.textContent = "saved " + new Date().toLocaleTimeString();
+    } catch (e) { saveStatus.textContent = "save failed!"; }
+  }, 350);
+}
+function load() {
+  // try v2, then migrate v1
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) { map = JSON.parse(raw); normalize(); return; }
+  } catch (e) { console.warn(e); }
+  try {
+    const old = localStorage.getItem("mushMapEditor.v1");
+    if (old) {
+      const o = JSON.parse(old);
+      map = { version: 2, rooms: o.rooms || {}, currentLayer: 0 };
+      // v1 used `level` as a tag — treat it as the layer so existing work isn't lost
+      for (const r of Object.values(map.rooms)) {
+        if (r.z == null) r.z = (r.level != null ? r.level : 0);
+        delete r.level;
+      }
+      normalize();
+      return;
+    }
+  } catch (e) { console.warn(e); }
+  map = defaultMap();
+}
+function normalize() {
+  if (!map.rooms) map.rooms = {};
+  if (!Array.isArray(map.areas)) map.areas = [];
+  for (const r of Object.values(map.rooms)) {
+    if (r.z == null) r.z = (r.level != null ? r.level : 0);
+    delete r.level;
+    if (!r.exits) r.exits = {};
+  }
+  if (map.currentLayer == null) map.currentLayer = layersPresent()[0];
+  // backfill tag labels (older saves / imports won't have them)
+  const labels = emptyTagLabels();
+  if (map.tagLabels) for (const k of Object.keys(labels)) if (map.tagLabels[k]) labels[k] = map.tagLabels[k];
+  map.tagLabels = labels;
+}
+
+// ---------- Undo / redo ----------
+function cloneMap() { return JSON.parse(JSON.stringify(map)); }
+function resetHistory() { history = [cloneMap()]; histIdx = 0; updateUndoButtons(); }
+function commit() {
+  history = history.slice(0, histIdx + 1);
+  history.push(cloneMap());
+  if (history.length > HIST_MAX) history.shift();
+  histIdx = history.length - 1;
+  save();
+  updateUndoButtons();
+}
+function undo() { if (histIdx > 0) { histIdx--; map = JSON.parse(JSON.stringify(history[histIdx])); afterRestore(); } }
+function redo() { if (histIdx < history.length - 1) { histIdx++; map = JSON.parse(JSON.stringify(history[histIdx])); afterRestore(); } }
+function afterRestore() {
+  // prune stale selection / transient state, clamp the layer, redraw
+  for (const id of [...selection]) if (!map.rooms[id]) selection.delete(id);
+  if (selectedId && !map.rooms[selectedId]) selectedId = null;
+  if (!selectedId && selection.size) selectedId = [...selection][0];
+  if (selectedAreaId && !(map.areas || []).some(a => a.id === selectedAreaId)) selectedAreaId = null;
+  const ls = layersPresent();
+  if (!ls.includes(map.currentLayer)) map.currentLayer = ls[0];
+  setPending(null); pathStart = null; pathRooms = new Set();
+  save(); render(); updateUndoButtons();
+}
+function updateUndoButtons() {
+  const u = document.getElementById("undoBtn"), r = document.getElementById("redoBtn");
+  if (u) u.disabled = histIdx <= 0;
+  if (r) r.disabled = histIdx >= history.length - 1;
+}
+
+// ---------- View preferences ----------
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (raw) { const p = JSON.parse(raw); if (p.onion) Object.assign(onion, p.onion); }
+  } catch (e) { /* ignore */ }
+}
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ onion })); } catch (e) { /* ignore */ }
+}
+
+// ---------- Selection ----------
+function selectSingle(id) { selection = new Set(id ? [id] : []); selectedId = id || null; }
+function toggleSel(id) {
+  if (selection.has(id)) {
+    selection.delete(id);
+    if (selectedId === id) selectedId = selection.size ? [...selection][selection.size - 1] : null;
+  } else {
+    selection.add(id);
+    selectedId = id;
+  }
+}
+function clearSelection() { selection = new Set(); selectedId = null; }
+
+// ---------- Layer helpers ----------
+function layersPresent() {
+  const zs = [...new Set(Object.values(map.rooms).map(r => r.z))];
+  if (!zs.length) return [0];
+  return zs.sort((a, b) => a - b);
+}
+function roomsOnLayer(z) { return Object.values(map.rooms).filter(r => r.z === z); }
+function roomAtCell(z, x, y) {
+  return Object.values(map.rooms).find(r => r.z === z && r.x === x && r.y === y) || null;
+}
+
+// ---------- Room operations ----------
+function createRoom(z, x, y, name) {
+  const id = uid();
+  map.rooms[id] = { id, name: name || "New Room", description: "", color: "Slate",
+                    size: "medium", x, y, z, exits: {} };
+  return map.rooms[id];
+}
+function deleteRoom(id) {
+  delete map.rooms[id];
+  for (const r of Object.values(map.rooms))
+    for (const d of Object.keys(r.exits))
+      if (r.exits[d] === id) delete r.exits[d];
+  selection.delete(id);
+  if (selectedId === id) selectedId = selection.size ? [...selection][0] : null;
+  if (!roomsOnLayer(map.currentLayer).length) {
+    const ls = layersPresent();
+    if (!ls.includes(map.currentLayer) && ls.length) map.currentLayer = ls[0];
+  }
+}
+// Re-tag a room to a different layer (keeps its grid cell + exits as logical links).
+function changeRoomLayer(r, nz) {
+  if (!Number.isFinite(nz)) { render(); return; }   // bad input → just re-sync the field
+  nz = Math.round(nz);
+  if (nz === r.z) return;
+  if (roomAtCell(nz, r.x, r.y)) {
+    alert(`A room already occupies cell (${r.x}, ${r.y}) on layer ${nz}. Move one of them first.`);
+    render();   // reset the input back to the current value
+    return;
+  }
+  r.z = nz;
+  map.currentLayer = nz;       // follow the room to its new layer
+  commit(); render();
+  if (view === "flat") centerOnRoom(r);
+}
+function deleteArea(id) { map.areas = map.areas.filter(a => a.id !== id); if (selectedAreaId === id) selectedAreaId = null; }
+function addExit(fromId, dir, toId) {
+  const from = map.rooms[fromId], to = map.rooms[toId];
+  if (!from || !to) return { ok:false, msg:"no source/target" };
+  const opp = OPP[dir];
+  // Hard rule: at most one UP and one DOWN per room — guard both ends.
+  if (dir === "UP" || dir === "DOWN") {
+    if (from.exits[dir] && from.exits[dir] !== toId)
+      return { ok:false, msg:`This room already has a ${dir} exit. Each room may have at most one — remove the existing one first.` };
+    if (to.exits[opp] && to.exits[opp] !== fromId)
+      return { ok:false, msg:`The target already has a ${opp} exit (only one allowed). Remove it first.` };
+  }
+  // Connections are bidirectional: write the exit and its reciprocal.
+  from.exits[dir] = toId;
+  to.exits[opp] = fromId;
+  return { ok:true };
+}
+
+// Carve: works for all 10 directions.
+//  compass -> same layer, neighbouring cell.
+//  UP/DOWN -> same (x,y), layer above/below. Behaves exactly like a compass carve, on z.
+function carve(fromId, dir) {
+  const from = map.rooms[fromId];
+  if (!from) return;
+
+  if (dir === "UP" || dir === "DOWN") {
+    if (from.exits[dir]) { gotoRoom(from.exits[dir]); return; } // already linked: just travel
+    const nz = from.z + (dir === "UP" ? 1 : -1);
+    let target = roomAtCell(nz, from.x, from.y);
+    if (!target) target = createRoom(nz, from.x, from.y, "New Room");
+    from.exits[dir] = target.id;
+    target.exits[OPP[dir]] = from.id;
+    selectSingle(target.id);
+    map.currentLayer = nz;          // follow the carve up/down
+    commit(); render(); centerOnRoom(target);
+    return;
+  }
+
+  if (!COMPASS.includes(dir)) return;
+  const [dx, dy] = VEC[dir];
+  const nx = clamp(from.x + dx, 0, GRID_N - 1);
+  const ny = clamp(from.y + dy, 0, GRID_N - 1);
+  let target = roomAtCell(from.z, nx, ny);
+  if (!target) target = createRoom(from.z, nx, ny, "New Room");
+  from.exits[dir] = target.id;
+  target.exits[OPP[dir]] = from.id;
+  selectSingle(target.id);
+  commit(); render();
+}
+
+// ---------- Layer navigation ----------
+function setLayer(z) {
+  map.currentLayer = z;
+  save();
+  render();
+}
+function stepLayer(delta) {
+  // step through layers that actually have rooms; if none above/below, allow a new empty one
+  const ls = layersPresent();
+  const cur = map.currentLayer;
+  const candidates = ls.filter(z => delta > 0 ? z > cur : z < cur);
+  if (candidates.length) {
+    setLayer(delta > 0 ? Math.min(...candidates) : Math.max(...candidates));
+  } else {
+    setLayer(cur + delta); // venture onto an empty layer (e.g. to carve into it)
+  }
+}
+function updateLayerLabel() {
+  const ls = layersPresent();
+  const n = roomsOnLayer(map.currentLayer).length;
+  layerLabel.textContent = "Layer " + map.currentLayer + (n ? `` : ` (empty)`);
+  layerLabel.title = "Layers in use: " + ls.join(", ");
+}
+
+// ---------- View transform ----------
+function applyTransform() {
+  world.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  zoomLabel.textContent = Math.round(scale * 100) + "%";
+  positionGrid();
+}
+function screenToWorld(sx, sy) {
+  const rect = viewport.getBoundingClientRect();
+  return { x: (sx - rect.left - panX) / scale, y: (sy - rect.top - panY) / scale };
+}
+function roomWorldCenter(r) { return { x: r.x * CELL + CELL/2, y: r.y * CELL + CELL/2 }; }
+function centerOnRoom(room) {
+  const rect = viewport.getBoundingClientRect();
+  const c = roomWorldCenter(room);
+  panX = rect.width / 2 - c.x * scale;
+  panY = rect.height / 2 - c.y * scale;
+  applyTransform();
+}
+function centerCellView(cx, cy) {
+  const rect = viewport.getBoundingClientRect();
+  panX = rect.width/2 - (cx*CELL+CELL/2)*scale;
+  panY = rect.height/2 - (cy*CELL+CELL/2)*scale;
+  applyTransform();
+}
+function zoomAt(sx, sy, factor) {
+  const rect = viewport.getBoundingClientRect();
+  const cx = sx - rect.left, cy = sy - rect.top;
+  const wx = (cx - panX) / scale, wy = (cy - panY) / scale;
+  scale = clamp(scale * factor, 0.2, 2.5);
+  panX = cx - wx * scale;
+  panY = cy - wy * scale;
+  applyTransform();
+}
+
+// ---------- Grid background ----------
+function resizeCanvas() {
+  const rect = viewport.getBoundingClientRect();
+  gridCanvas.width = rect.width; gridCanvas.height = rect.height;
+  positionGrid();
+}
+function positionGrid() {
+  const w = gridCanvas.width, h = gridCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const step = CELL * scale;
+  if (step < 6) return;
+  const startX = panX % step, startY = panY % step;
+  const firstCol = Math.floor((-panX) / step), firstRow = Math.floor((-panY) / step);
+  ctx.lineWidth = 1;
+  let col = firstCol;
+  for (let x = startX; x < w; x += step, col++) {
+    ctx.strokeStyle = (col % 5 === 0) ? "#2c3340" : "#212733";
+    ctx.beginPath(); ctx.moveTo(Math.round(x)+0.5, 0); ctx.lineTo(Math.round(x)+0.5, h); ctx.stroke();
+  }
+  let row = firstRow;
+  for (let y = startY; y < h; y += step, row++) {
+    ctx.strokeStyle = (row % 5 === 0) ? "#2c3340" : "#212733";
+    ctx.beginPath(); ctx.moveTo(0, Math.round(y)+0.5); ctx.lineTo(w, Math.round(y)+0.5); ctx.stroke();
+  }
+}
+
+// ---------- Render ----------
+function render() {
+  updateLayerLabel();
+  if (view === "flat") {
+    viewport.style.display = ""; view3dEl.classList.remove("active");
+    renderFlat();
+  } else {
+    viewport.style.display = "none"; view3dEl.classList.add("active");
+    resize3d();
+    render3d();
+  }
+  renderInspector();
+}
+
+function renderFlat() {
+  world.querySelectorAll(".room").forEach(e => e.remove());
+  world.querySelectorAll(".area").forEach(e => e.remove());
+  const z = map.currentLayer;
+
+  // areas: behind everything (inserted before the SVG connector layer), shown on every layer
+  for (const ar of map.areas) world.insertBefore(makeAreaEl(ar), svg);
+
+  // SVG connectors
+  svg.setAttribute("width", WORLD); svg.setAttribute("height", WORLD);
+  svg.innerHTML = `<defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"></path>
+    </marker></defs>`;
+
+  // --- onion-skin: neighbour layers ghosted behind everything, non-interactive ---
+  if (onion.below) for (const r of roomsOnLayer(z - 1)) world.appendChild(makeRoomEl(r, "below"));
+  if (onion.above) for (const r of roomsOnLayer(z + 1)) world.appendChild(makeRoomEl(r, "above"));
+
+  // --- connectors for current layer compass exits ---
+  // Group same-layer exits into undirected pairs so a reciprocal corridor is ONE
+  // line, not two stacked ones. Off-layer exits stay as single directional stubs.
+  const pairs = new Map(); // "idA|idB" (sorted) -> [{from,to,dir}, ...]
+  for (const r of roomsOnLayer(z)) {
+    for (const dir of COMPASS) {
+      const t = map.rooms[r.exits[dir]];
+      if (!t) continue;
+      if (t.z === z) {
+        const key = [r.id, t.id].sort().join("|");
+        if (!pairs.has(key)) pairs.set(key, []);
+        pairs.get(key).push({ from: r, to: t, dir });
+      } else {
+        const a = roomWorldCenter(r);
+        const [dx, dy] = VEC[dir];
+        drawStub(a.x, a.y, a.x + dx*CELL*0.7, a.y + dy*CELL*0.7, dir + "→L" + t.z);
+      }
+    }
+  }
+  for (const exits of pairs.values()) {
+    const A = exits[0].from, B = exits[0].to;
+    const ca = roomWorldCenter(A), cb = roomWorldCenter(B);
+    drawConnector(ca.x, ca.y, cb.x, cb.y);
+    const adjacent = Math.max(Math.abs(A.x - B.x), Math.abs(A.y - B.y)) === 1;
+    const cleanTwoWay = exits.length === 2 && exits[1].dir === OPP[exits[0].dir];
+    // A normal two-way link between touching cells needs no label — direction is obvious.
+    if (adjacent && cleanTwoWay) continue;
+    // Otherwise label each direction. A reciprocal pair sits a third of the way
+    // in from each end (so the two never meet); a lone/one-way label sits nearer
+    // the middle where there's the most room.
+    const frac = exits.length === 2 ? 0.33 : 0.45;
+    for (const ex of exits) drawDirLabel(ex.from, ex.to, ex.dir, frac);
+  }
+
+  // --- current layer rooms (solid, on top) ---
+  for (const r of roomsOnLayer(z)) world.appendChild(makeRoomEl(r, false));
+}
+
+function makeAreaEl(ar) {
+  const el = document.createElement("div");
+  el.className = "area" + (ar.id === selectedAreaId ? " selected" : "");
+  el.dataset.aid = ar.id;
+  el.style.left = (ar.x * CELL) + "px";
+  el.style.top = (ar.y * CELL) + "px";
+  el.style.width = (ar.w * CELL) + "px";
+  el.style.height = (ar.h * CELL) + "px";
+  const c = areaHex(ar);
+  el.style.background = hexA(c, 0.12);
+  el.style.borderColor = hexA(c, 0.7);
+  const lab = document.createElement("span");
+  lab.className = "area-label"; lab.textContent = ar.name;
+  lab.style.background = hexA(c, 0.85);
+  el.appendChild(lab);
+  const rz = document.createElement("div");
+  rz.className = "area-resize"; rz.dataset.aid = ar.id;
+  el.appendChild(rz);
+  return el;
+}
+// ghost: false (solid), or "below" / "above" for onion-skin neighbour layers.
+function makeRoomEl(r, ghost) {
+  const sel = !ghost && (r.id === selectedId || selection.has(r.id));
+  const el = document.createElement("div");
+  el.className = "room" + (ghost ? " ghost" : "")
+    + (ghost === "above" ? " above" : "")
+    + (sel ? " selected" : "")
+    + (!ghost && r.id === pendingLink ? " linksource" : "")
+    + (!ghost && r.id === pathStart ? " linksource" : "")
+    + (!ghost && pathRooms.has(r.id) ? " pathhit" : "")
+    + (!ghost && searchTerm && searchMatches.includes(r.id) ? " searchhit" : "");
+  el.dataset.id = r.id;
+  const px = SIZE_PX[r.size] || SIZE_PX.medium;
+  const c = roomWorldCenter(r);
+  el.style.left = c.x + "px"; el.style.top = c.y + "px";
+  el.style.width = px + "px"; el.style.height = px + "px";
+  el.style.background = colorOf(r);
+  el.style.fontSize = (r.size === "small" ? 9 : r.size === "large" ? 12 : 10) + "px";
+  if (ghost) el.style.opacity = onion.opacity;
+  const tag = map.tagLabels && map.tagLabels[r.color];
+  el.title = r.name + (tag ? "  ·  " + tag : "");
+  el.innerHTML = `<span class="rname">${escapeHtml(r.name)}</span>`;
+  if (!ghost) {
+    if (r.exits.UP)   el.appendChild(vbadge("up", "↑"));
+    if (r.exits.DOWN) el.appendChild(vbadge("down", "↓"));
+  }
+  return el;
+}
+function vbadge(kind, ch) {
+  const b = document.createElement("div");
+  b.className = "vbadge " + kind; b.textContent = ch; b.dataset.vbadge = kind;
+  return b;
+}
+function drawConnector(x1, y1, x2, y2) {
+  const ns = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+  line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+  line.setAttribute("stroke", "#4a5566"); line.setAttribute("stroke-width", "2.5");
+  svg.appendChild(line);
+}
+// Label placed near the SOURCE room so a reciprocal pair's two labels sit at
+// opposite ends of the line and never collide.
+function drawDirLabel(from, to, dir, frac) {
+  const ns = "http://www.w3.org/2000/svg";
+  const a = roomWorldCenter(from), b = roomWorldCenter(to);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const off = len * (frac || 0.35);
+  const txt = document.createElementNS(ns, "text");
+  txt.setAttribute("x", a.x + dx / len * off);
+  txt.setAttribute("y", a.y + dy / len * off);
+  txt.setAttribute("text-anchor", "middle");
+  txt.setAttribute("dominant-baseline", "central");
+  txt.setAttribute("class", "exitlabel");
+  txt.textContent = dir;
+  svg.appendChild(txt);
+}
+function drawStub(x1, y1, x2, y2, label) {
+  const ns = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+  line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+  line.setAttribute("stroke", "#5b9dff"); line.setAttribute("stroke-width", "2.5");
+  line.setAttribute("stroke-dasharray", "5,4"); line.setAttribute("marker-end", "url(#arrow)");
+  svg.appendChild(line);
+  const txt = document.createElementNS(ns, "text");
+  txt.setAttribute("x", x2); txt.setAttribute("y", y2 - 4);
+  txt.setAttribute("text-anchor", "middle"); txt.setAttribute("class", "exitlabel");
+  txt.textContent = label; svg.appendChild(txt);
+}
+
+// ---------- 3D view (hand-rolled canvas: rotate → project → painter-sort) ----------
+function resize3d() {
+  const rect = view3dEl.getBoundingClientRect();
+  if (rect.width && rect.height && (view3dEl.width !== rect.width || view3dEl.height !== rect.height)) {
+    view3dEl.width = rect.width; view3dEl.height = rect.height;
+  }
+}
+// world coords for a room: x→east, -layer→up, -gridY→depth.
+// Use the cell CENTRE (+CELL/2) to match the flat view and sit symmetrically inside
+// area slabs (which span cell edges). grid-Y is negated so the ground plane isn't
+// mirrored vs. the flat top-down map (canvas screen-Y points downward).
+function room3dWorld(r) { return { x: r.x * CELL + CELL/2, y: -r.z * LAYER_GAP, z: -(r.y * CELL + CELL/2) }; }
+function scene3dCentroid() {
+  const rooms = Object.values(map.rooms);
+  if (!rooms.length) return { x: 0, y: 0, z: 0, radius: 1 };
+  let sx = 0, sy = 0, sz = 0;
+  for (const r of rooms) { const w = room3dWorld(r); sx += w.x; sy += w.y; sz += w.z; }
+  const c = { x: sx / rooms.length, y: sy / rooms.length, z: sz / rooms.length };
+  let rad = 1;
+  for (const r of rooms) { const w = room3dWorld(r); rad = Math.max(rad, Math.hypot(w.x - c.x, w.y - c.y, w.z - c.z)); }
+  c.radius = rad;
+  return c;
+}
+function fit3d() {
+  const c = scene3dCentroid();
+  cam3d.cx = c.x; cam3d.cy = c.y; cam3d.cz = c.z;
+  cam3d.dist = Math.max(700, c.radius * 2.4 + 600);
+  cam3d.fitted = true;
+}
+// project a world point to screen; returns {sx, sy, depth, scale} or null if behind camera
+function project3d(p) {
+  const dx = p.x - cam3d.cx, dy = p.y - cam3d.cy, dz = p.z - cam3d.cz;
+  const cy = Math.cos(cam3d.yaw), sy = Math.sin(cam3d.yaw);
+  // yaw about vertical (y) axis
+  let rx = dx * cy - dz * sy;
+  let rz = dx * sy + dz * cy;
+  let ry = dy;
+  // pitch about horizontal (x) axis
+  const cp = Math.cos(cam3d.pitch), sp = Math.sin(cam3d.pitch);
+  const ry2 = ry * cp - rz * sp;
+  const rz2 = ry * sp + rz * cp;
+  const depth = rz2 + cam3d.dist;          // distance from camera plane (dist = camera distance)
+  if (depth <= 1) return null;
+  const F = 900;                            // fixed focal length (decoupled from camera distance)
+  const k = F / depth;
+  return {
+    sx: view3dEl.width / 2 + rx * k,
+    sy: view3dEl.height / 2 + ry2 * k,
+    depth, scale: k
+  };
+}
+let proj3dCache = [];   // [{id, sx, sy, scale}] for hit-testing after a render
+function render3d() {
+  if (!cam3d.fitted) fit3d();
+  const W = view3dEl.width, H = view3dEl.height;
+  ctx3d.clearRect(0, 0, W, H);
+  const rooms = Object.values(map.rooms);
+  if (!rooms.length) {
+    ctx3d.fillStyle = "#8a93a3"; ctx3d.font = "14px Segoe UI, sans-serif";
+    ctx3d.textAlign = "center";
+    ctx3d.fillText("No rooms yet — build a map in the Flat view, then come back to orbit it in 3D.", W/2, H/2);
+    proj3dCache = []; return;
+  }
+  // area slabs first (behind everything): translucent volumes spanning all layers
+  if (map.areas.length) {
+    const ls = layersPresent();
+    const yTop = -(Math.max(...ls) + 0.6) * LAYER_GAP;
+    const yBot = -(Math.min(...ls) - 0.6) * LAYER_GAP;
+    for (const ar of map.areas) drawAreaSlab3d(ar, yTop, yBot);
+  }
+
+  // project every room once
+  const pr = {};
+  for (const r of rooms) { const p = project3d(room3dWorld(r)); if (p) pr[r.id] = p; }
+
+  // exit lines (deduped undirected pairs), drawn first so blocks occlude them
+  const pairs = new Map();
+  for (const r of rooms) {
+    for (const dir of DIRS) {
+      const t = map.rooms[r.exits[dir]];
+      if (!t) continue;
+      const key = [r.id, t.id].sort().join("|");
+      if (!pairs.has(key)) pairs.set(key, { a: r, b: t, vertical: (dir === "UP" || dir === "DOWN") });
+      else if (dir === "UP" || dir === "DOWN") pairs.get(key).vertical = true;
+    }
+  }
+  for (const { a, b, vertical } of pairs.values()) {
+    const pa = pr[a.id], pb = pr[b.id];
+    if (!pa || !pb) continue;
+    ctx3d.strokeStyle = vertical ? "rgba(91,157,255,0.85)" : "rgba(140,150,165,0.55)";
+    ctx3d.lineWidth = vertical ? 2.5 : 1.5;
+    ctx3d.beginPath(); ctx3d.moveTo(pa.sx, pa.sy); ctx3d.lineTo(pb.sx, pb.sy); ctx3d.stroke();
+  }
+
+  // rooms, sorted far → near
+  const order = rooms.filter(r => pr[r.id]).sort((r1, r2) => pr[r2.id].depth - pr[r1.id].depth);
+  proj3dCache = [];
+  for (const r of order) {
+    const p = pr[r.id];
+    const sz = clamp(46 * p.scale, 8, 120);
+    const half = sz / 2;
+    const isSel = r.id === selectedId || selection.has(r.id);
+    // block
+    ctx3d.fillStyle = colorOf(r);
+    ctx3d.strokeStyle = isSel ? "#ffffff" : "rgba(0,0,0,0.45)";
+    ctx3d.lineWidth = isSel ? 3 : 1;
+    roundRect3d(p.sx - half, p.sy - half, sz, sz, Math.min(8, half * 0.4));
+    ctx3d.fill(); ctx3d.stroke();
+    if (isSel) {
+      ctx3d.strokeStyle = "#5b9dff"; ctx3d.lineWidth = 2;
+      roundRect3d(p.sx - half - 4, p.sy - half - 4, sz + 8, sz + 8, Math.min(10, half * 0.4 + 4));
+      ctx3d.stroke();
+    }
+    // label inside the block (like the flat view), wrapping to 2 lines; hidden when too small
+    if (sz >= 20) {
+      const fs = clamp(sz * 0.24, 7, 13);
+      ctx3d.font = fs + "px Segoe UI, sans-serif";
+      ctx3d.textAlign = "center"; ctx3d.textBaseline = "middle";
+      ctx3d.fillStyle = "#11141a";
+      const lines = wrapLabel3d(r.name, sz - 8, 2);
+      const lh = fs * 1.12;
+      const y0 = p.sy - (lines.length - 1) * lh / 2;
+      lines.forEach((ln, i) => ctx3d.fillText(ln, p.sx, y0 + i * lh));
+    }
+    proj3dCache.push({ id: r.id, sx: p.sx, sy: p.sy, r: half + 4 });
+  }
+}
+// truncate text with an ellipsis to fit maxW (font must already be set on ctx3d)
+function fitLabel3d(text, maxW) {
+  if (ctx3d.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx3d.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+  return t + "…";
+}
+// wrap text to at most maxLines lines fitting maxW; ellipsize the last line if needed
+function wrapLabel3d(text, maxW, maxLines) {
+  if (ctx3d.measureText(text).width <= maxW) return [text];
+  const words = text.split(/\s+/);
+  const lines = [];
+  let cur = "";
+  for (let i = 0; i < words.length; i++) {
+    const test = cur ? cur + " " + words[i] : words[i];
+    if (!cur || ctx3d.measureText(test).width <= maxW) {
+      cur = test;
+    } else {
+      lines.push(cur);
+      if (lines.length === maxLines - 1) { cur = words.slice(i).join(" "); break; } // rest onto final line
+      cur = words[i];
+    }
+  }
+  lines.push(cur);
+  return lines.slice(0, maxLines).map(l => fitLabel3d(l, maxW));
+}
+// translucent extruded box for an area, spanning yBot..yTop (all layers)
+function drawAreaSlab3d(ar, yTop, yBot) {
+  const x0 = ar.x * CELL, x1 = (ar.x + ar.w) * CELL;
+  const z0 = -ar.y * CELL, z1 = -(ar.y + ar.h) * CELL;   // grid-Y negated to match room3dWorld
+  const corners = [
+    [x0,yBot,z0],[x1,yBot,z0],[x1,yBot,z1],[x0,yBot,z1],  // bottom 0-3
+    [x0,yTop,z0],[x1,yTop,z0],[x1,yTop,z1],[x0,yTop,z1]   // top 4-7
+  ].map(c => project3d({ x:c[0], y:c[1], z:c[2] }));
+  if (corners.some(p => !p)) return;
+  const c = areaHex(ar);
+  ctx3d.fillStyle = hexA(c, 0.10);
+  ctx3d.strokeStyle = hexA(c, 0.55);
+  ctx3d.lineWidth = 1.5;
+  const faces = [[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
+  for (const f of faces) {
+    ctx3d.beginPath();
+    ctx3d.moveTo(corners[f[0]].sx, corners[f[0]].sy);
+    for (let i = 1; i < f.length; i++) ctx3d.lineTo(corners[f[i]].sx, corners[f[i]].sy);
+    ctx3d.closePath(); ctx3d.fill(); ctx3d.stroke();
+  }
+  const tc = project3d({ x:(x0+x1)/2, y:yTop, z:(z0+z1)/2 });
+  if (tc) {
+    ctx3d.fillStyle = hexA(c, 0.95); ctx3d.font = "bold 12px Segoe UI, sans-serif";
+    ctx3d.textAlign = "center"; ctx3d.textBaseline = "bottom";
+    ctx3d.lineWidth = 3; ctx3d.strokeStyle = "rgba(15,17,21,0.85)";
+    ctx3d.strokeText(ar.name, tc.sx, tc.sy - 4);
+    ctx3d.fillText(ar.name, tc.sx, tc.sy - 4);
+  }
+}
+function roundRect3d(x, y, w, h, r) {
+  ctx3d.beginPath();
+  ctx3d.moveTo(x + r, y);
+  ctx3d.arcTo(x + w, y, x + w, y + h, r);
+  ctx3d.arcTo(x + w, y + h, x, y + h, r);
+  ctx3d.arcTo(x, y + h, x, y, r);
+  ctx3d.arcTo(x, y, x + w, y, r);
+  ctx3d.closePath();
+}
+function pick3d(mx, my) {
+  // nearest projected room within its radius (cache is far→near, so last match = frontmost)
+  let hit = null;
+  for (const c of proj3dCache) {
+    if (Math.hypot(mx - c.sx, my - c.sy) <= c.r) hit = c.id;
+  }
+  return hit;
+}
+
+// ---------- Inspector ----------
+function renderInspector() {
+  // Area selected → area editor takes precedence
+  const ar = selectedAreaId && map.areas.find(a => a.id === selectedAreaId);
+  if (ar) {
+    inspector.innerHTML = `<h3>Area</h3>
+      <div class="insec">
+        <div class="field"><label>Name</label><input type="text" id="a_name" value="${escapeAttr(ar.name)}"></div>
+        <div class="field"><label>Colour</label><div class="swatches" id="a_color"></div></div>
+        <div class="hint">cells (${ar.x}, ${ar.y}) · ${ar.w}×${ar.h} · spans all layers</div>
+      </div>
+      <div class="insec"><button class="danger" id="a_del" style="width:100%">Delete area</button></div>
+      <div class="empty-note hint">Drag the area to move it; drag the bottom-right handle to resize. Toggle <b>▭ Area</b> off to return to room editing.</div>`;
+    const sw = document.getElementById("a_color");
+    PALETTE.forEach(p => {
+      const s = document.createElement("div");
+      s.className = "swatch" + (p.name === ar.color ? " sel" : "");
+      s.style.background = p.c; s.title = (map.tagLabels[p.name] || p.name);
+      s.onclick = () => { ar.color = p.name; commit(); render(); };
+      sw.appendChild(s);
+    });
+    document.getElementById("a_name").oninput = e => {
+      ar.name = e.target.value; save();
+      const lab = world.querySelector(`.area[data-aid="${ar.id}"] .area-label`);
+      if (lab) lab.textContent = ar.name;   // live-update without rebuilding the inspector
+    };
+    document.getElementById("a_name").onchange = () => commit();
+    document.getElementById("a_del").onclick = () => { if (confirm(`Delete area "${ar.name}"?`)) { deleteArea(ar.id); commit(); render(); } };
+    return;
+  }
+  if (!selectedId || !map.rooms[selectedId]) {
+    inspector.innerHTML = `<h3>Inspector</h3>
+      <div class="empty-note">
+        <p>No room selected.</p>
+        <p><b>Double-click an empty cell</b> to create a room.<br>
+        <b>Click a room</b> to select & edit it.<br>
+        <b>Drag a room</b> to move it on this layer.<br>
+        <b>Drag empty space</b> to pan (<b>middle-drag</b> pans in any mode).<br>
+        <b>Shift-drag</b> room→room to link two rooms on this layer.<br>
+        <b>🔗 Link mode</b>: click a room, switch layers if needed, then click the target — links across layers / gaps.</p>
+        <p class="hint"><b>Ctrl+click</b> rooms or <b>Shift-drag</b> empty space to multi-select (add <b>Alt</b> to box-select across <i>all</i> layers), then move / recolor / delete them together.</p>
+        <p class="hint">With a room selected — carve with the <b>Q W E / A S D / Z X C</b> rose: edges are compass (<b>X</b> = south), centre <b>S</b> = up a layer, <b>Shift+S</b> = down · <b>Del</b> delete · <b>Esc</b> deselect.</p>
+        <p class="hint"><b>Ctrl+Z / Ctrl+Y</b> undo / redo · the <b>👁 Onion</b> menu controls which neighbour layers ghost through.</p>
+        <p class="hint" style="margin-top:14px;opacity:.7;">© 2026 Stoia · MIT Licensed</p>
+      </div>`;
+    return;
+  }
+  // Multiple rooms selected → bulk-edit panel
+  if (selection.size > 1) {
+    inspector.innerHTML =
+      `<h3>${selection.size} rooms selected</h3>` +
+      `<div class="insec"><label class="seclabel">Set colour tag (all)</label><div class="swatches" id="bulk_color"></div></div>` +
+      `<div class="insec"><div class="field"><label>Set size (all)</label>
+        <select id="bulk_size">
+          <option value="">— keep —</option>
+          <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
+        </select></div></div>` +
+      `<div class="insec">
+        <button id="bulk_clear" style="width:100%;margin-bottom:6px;">Clear selection</button>
+        <button class="danger" id="bulk_del" style="width:100%">Delete ${selection.size} rooms</button>
+      </div>` +
+      `<div class="empty-note hint">Drag any selected room to move them together. Ctrl+click adds/removes; Shift-drag box-selects (hold Alt to span all layers).</div>`;
+    const bsw = document.getElementById("bulk_color");
+    PALETTE.forEach(p => {
+      const s = document.createElement("div");
+      s.className = "swatch"; s.style.background = p.c;
+      s.title = (map.tagLabels[p.name] || p.name);
+      s.onclick = () => { for (const id of selection) map.rooms[id].color = p.name; commit(); render(); };
+      bsw.appendChild(s);
+    });
+    document.getElementById("bulk_size").onchange = e => {
+      if (!e.target.value) return;
+      for (const id of selection) map.rooms[id].size = e.target.value;
+      commit(); render();
+    };
+    document.getElementById("bulk_clear").onclick = () => { clearSelection(); render(); };
+    document.getElementById("bulk_del").onclick = () => {
+      if (confirm(`Delete ${selection.size} selected rooms?`)) { for (const id of [...selection]) deleteRoom(id); clearSelection(); commit(); render(); }
+    };
+    return;
+  }
+
+  const r = map.rooms[selectedId];
+  let h = `<h3>Room — Layer ${r.z}</h3>`;
+  h += `<div class="insec">
+    <div class="field"><label>Name</label><input type="text" id="f_name" value="${escapeAttr(r.name)}"></div>
+    <div class="field"><label>Description / notes</label><textarea id="f_desc">${escapeHtml(r.description)}</textarea></div>
+    <div class="field"><label>Color tag</label><div class="swatches" id="f_color"></div></div>
+    <div class="field"><label>Size (visual only)</label>
+      <select id="f_size">
+        <option value="small"${r.size==="small"?" selected":""}>Small</option>
+        <option value="medium"${r.size==="medium"?" selected":""}>Medium</option>
+        <option value="large"${r.size==="large"?" selected":""}>Large</option>
+      </select></div>
+    <div class="field"><label>Layer</label>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <button id="f_layer_dn" class="iconbtn" title="Move down a layer">−</button>
+        <input type="text" inputmode="numeric" id="f_layer" value="${r.z}" style="width:60px;text-align:center;">
+        <button id="f_layer_up" class="iconbtn" title="Move up a layer">+</button>
+      </div></div>
+    <div class="hint">grid (${r.x}, ${r.y})</div>
+  </div>`;
+
+  h += `<div class="insec">
+    <span class="seclabel">Carve (creates + links a neighbour)</span>
+    <div class="rose" id="rose">
+      <button data-carve="NW">NW</button><button data-carve="N">N</button><button data-carve="NE">NE</button>
+      <button data-carve="W">W</button>
+        <div class="center">
+          <button data-carve="UP" title="Carve a room one layer up (same cell)">↑ up</button>
+          <button data-carve="DOWN" title="Carve a room one layer down (same cell)">↓ dn</button>
+        </div>
+      <button data-carve="E">E</button>
+      <button data-carve="SW">SW</button><button data-carve="S">S</button><button data-carve="SE">SE</button>
+    </div>
+  </div>`;
+
+  h += `<div class="insec"><span class="seclabel">Exits</span>`;
+  const exitDirs = DIRS.filter(d => r.exits[d]);
+  if (!exitDirs.length) h += `<div class="hint">No exits yet.</div>`;
+  for (const d of exitDirs) {
+    const t = map.rooms[r.exits[d]];
+    const tname = t ? t.name + (t.z !== r.z ? ` (L${t.z})` : "") : "??";
+    h += `<div class="exitrow"><span class="dir">${d}</span>
+      <span class="tgt" data-goto="${r.exits[d]}">${escapeHtml(tname)}</span>
+      <button data-delexit="${d}">✕</button></div>`;
+  }
+  h += `</div>`;
+  h += `<div class="insec"><button class="danger" id="delRoom" style="width:100%">Delete room</button></div>`;
+  inspector.innerHTML = h;
+
+  const sw = document.getElementById("f_color");
+  PALETTE.forEach(p => {
+    const s = document.createElement("div");
+    s.className = "swatch" + (p.name === r.color ? " sel" : "");
+    s.style.background = p.c; s.title = (map.tagLabels[p.name] || p.name);
+    s.onclick = () => { r.color = p.name; commit(); render(); };
+    sw.appendChild(s);
+  });
+  // text fields: live autosave on input, single undo step committed on blur/change
+  document.getElementById("f_name").oninput = e => { r.name = e.target.value; save(); refreshRoomLabel(r); };
+  document.getElementById("f_name").onchange = () => commit();
+  document.getElementById("f_desc").oninput = e => { r.description = e.target.value; save(); };
+  document.getElementById("f_desc").onchange = () => commit();
+  document.getElementById("f_size").onchange = e => { r.size = e.target.value; commit(); render(); };
+  document.getElementById("f_layer").onchange = e => changeRoomLayer(r, parseInt(e.target.value, 10));
+  document.getElementById("f_layer_up").onclick = () => changeRoomLayer(r, r.z + 1);
+  document.getElementById("f_layer_dn").onclick = () => changeRoomLayer(r, r.z - 1);
+  document.querySelectorAll("[data-carve]").forEach(b => b.onclick = () => carve(r.id, b.dataset.carve));
+  document.querySelectorAll("[data-delexit]").forEach(b => b.onclick = () => { delete r.exits[b.dataset.delexit]; commit(); render(); });
+  document.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => gotoRoom(el.dataset.goto));
+  document.getElementById("delRoom").onclick = () => {
+    if (confirm(`Delete "${r.name}"? Exits referencing it will be removed. The cell is left empty.`)) { deleteRoom(r.id); commit(); render(); }
+  };
+}
+function refreshRoomLabel(r) {
+  const el = world.querySelector(`.room[data-id="${r.id}"] .rname`);
+  if (el) el.textContent = r.name;
+}
+function gotoRoom(id) {
+  const r = map.rooms[id];
+  if (!r) return;
+  selectSingle(id);
+  if (view !== "flat") { view = "flat"; updateViewButtons(); }
+  map.currentLayer = r.z;
+  render();
+  centerOnRoom(r);
+}
+
+// ---------- Search ----------
+function runSearch(term) {
+  searchTerm = term.trim().toLowerCase();
+  searchIdx = -1;
+  if (!searchTerm) {
+    searchMatches = [];
+  } else {
+    searchMatches = Object.values(map.rooms).filter(r =>
+      r.name.toLowerCase().includes(searchTerm) ||
+      (r.description || "").toLowerCase().includes(searchTerm)
+    ).map(r => r.id);
+  }
+  updateSearchInfo();
+  render();
+}
+function updateSearchInfo() {
+  const el = document.getElementById("searchInfo");
+  if (!searchTerm) { el.textContent = ""; return; }
+  const n = searchMatches.length;
+  el.textContent = n ? `${n} match${n !== 1 ? "es" : ""} · ↵ to jump` : "no matches";
+}
+function jumpNextMatch() {
+  if (!searchMatches.length) return;
+  searchIdx = (searchIdx + 1) % searchMatches.length;
+  gotoRoom(searchMatches[searchIdx]);
+}
+
+// ---------- Pathfinder (BFS shortest path over the exit graph) ----------
+const DIRWORD = { N:"north", NE:"northeast", E:"east", SE:"southeast", S:"south",
+                  SW:"southwest", W:"west", NW:"northwest", UP:"up", DOWN:"down" };
+function roomName(id) { return map.rooms[id] ? map.rooms[id].name : "?"; }
+function findPath(startId, endId) {
+  if (startId === endId) return { steps: [], rooms: [startId] };
+  const prev = new Map();           // roomId -> { from, dir }
+  const visited = new Set([startId]);
+  const queue = [startId];
+  while (queue.length) {
+    const cur = queue.shift();
+    const room = map.rooms[cur];
+    if (!room) continue;
+    for (const dir of DIRS) {
+      const t = room.exits[dir];
+      if (!t || visited.has(t) || !map.rooms[t]) continue;
+      visited.add(t);
+      prev.set(t, { from: cur, dir });
+      if (t === endId) {
+        const steps = [], rooms = [endId];
+        let n = endId;
+        while (n !== startId) { const p = prev.get(n); steps.unshift(p.dir); rooms.unshift(p.from); n = p.from; }
+        return { steps, rooms };
+      }
+      queue.push(t);
+    }
+  }
+  return null;
+}
+function computePath(startId, endId) {
+  const res = findPath(startId, endId);
+  const box = document.getElementById("pathResult");
+  box.style.display = "block";
+  if (!res) {
+    pathRooms = new Set();
+    box.innerHTML = `<div><b>No route</b> from “${escapeHtml(roomName(startId))}” to “${escapeHtml(roomName(endId))}”.</div>` +
+      `<button id="pathClose">✕ close</button>`;
+  } else {
+    pathRooms = new Set(res.rooms);
+    const dirStr = res.steps.length ? res.steps.map(d => DIRWORD[d]).join(", ") : "(same room)";
+    box.innerHTML =
+      `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}</div>` +
+      `<div class="pathdirs">${escapeHtml(dirStr)}</div>` +
+      `<button id="pathClose">✕ clear</button>`;
+  }
+  document.getElementById("pathClose").onclick = clearPath;
+  render();
+}
+function clearPath() {
+  pathRooms = new Set(); pathStart = null;
+  document.getElementById("pathResult").style.display = "none";
+  setMode("none");
+  render();
+}
+function setPathHint() {
+  const box = document.getElementById("pathResult");
+  if (!pathMode) return;
+  box.style.display = "block";
+  box.innerHTML = pathStart
+    ? `<div>Start: <b>${escapeHtml(roomName(pathStart))}</b> — now click the destination (any layer).</div><button id="pathClose">✕ cancel</button>`
+    : `<div>Pathfinder: click the <b>start</b> room.</div><button id="pathClose">✕ cancel</button>`;
+  document.getElementById("pathClose").onclick = clearPath;
+}
+
+// ---------- Pointer interactions ----------
+const CLICK_THRESH = 4;
+function setPending(id) {
+  pendingLink = id;
+  const hint = document.getElementById("linkHint");
+  if (id) {
+    hint.style.display = "";
+    hint.textContent = "linking from “" + (map.rooms[id] ? map.rooms[id].name : "?") + "” — change layers if needed, click the target · Esc cancels";
+  } else {
+    hint.style.display = "none";
+  }
+  render();
+}
+viewport.addEventListener("mousedown", e => {
+  // Middle-mouse drag pans in any mode (incl. area / link / path).
+  if (e.button === 1) {
+    drag = { type:"pan", x0:e.clientX, y0:e.clientY, px:panX, py:panY, moved:false };
+    viewport.classList.add("panning"); e.preventDefault(); return;
+  }
+  if (e.button !== 0) return;
+  // Area mode: draw / move / resize zone rectangles (rooms are click-through here)
+  if (areaMode) {
+    const handle = e.target.closest(".area-resize");
+    const areaEl = e.target.closest(".area");
+    if (handle) {
+      const ar = map.areas.find(a => a.id === handle.dataset.aid);
+      selectedAreaId = ar.id; render();
+      drag = { type:"area-resize", aid: ar.id, x0:e.clientX, y0:e.clientY, sw: ar.w, sh: ar.h };
+    } else if (areaEl) {
+      const ar = map.areas.find(a => a.id === areaEl.dataset.aid);
+      selectedAreaId = ar.id; clearSelection(); render();
+      drag = { type:"area-move", aid: ar.id, x0:e.clientX, y0:e.clientY, sx: ar.x, sy: ar.y };
+    } else {
+      drag = { type:"area-draw", x0:e.clientX, y0:e.clientY };
+      const m = document.getElementById("marquee");
+      m.classList.add("areadraw"); m.classList.remove("all");
+      m.style.display = "block"; m.style.left = e.clientX + "px"; m.style.top = e.clientY + "px";
+      m.style.width = "0px"; m.style.height = "0px";
+    }
+    e.preventDefault(); return;
+  }
+  const roomEl = e.target.closest(".room:not(.ghost)");
+  const badge = e.target.closest(".vbadge");
+  if (badge && roomEl) return; // handled on click
+  if (roomEl) {
+    const id = roomEl.dataset.id;
+    // Shift-drag = quick same-layer link (drag a line to a target)
+    if (e.shiftKey) {
+      selectSingle(id); render();
+      drag = { type:"link", fromId:id, ghost: makeGhostLine(), x0:e.clientX, y0:e.clientY };
+      e.preventDefault(); return;
+    }
+    // Ctrl/Cmd-click = toggle this room in the multi-selection (no drag)
+    if (e.ctrlKey || e.metaKey) {
+      toggleSel(id); render();
+      e.preventDefault(); return;
+    }
+    // Link mode = click source, (switch layers), click target — works across layers/gaps
+    if (linkMode) {
+      if (!pendingLink) { selectSingle(id); setPending(id); }
+      else if (pendingLink !== id) { openDirPicker(pendingLink, id, e.clientX, e.clientY); }
+      else { setPending(null); }   // clicked the source again → cancel
+      // stop this click bubbling to the document "click-outside-to-close" guard,
+      // which would otherwise immediately close the picker we just opened.
+      e.stopPropagation(); e.preventDefault(); return;
+    }
+    // Path mode = click start, then destination → shortest route
+    if (pathMode) {
+      if (!pathStart) { selectSingle(id); pathStart = id; pathRooms = new Set(); setPathHint(); render(); }
+      else if (pathStart !== id) { computePath(pathStart, id); pathStart = null; }
+      else { pathStart = null; setPathHint(); render(); }
+      e.preventDefault(); return;
+    }
+    // Plain click: if part of a multi-selection, drag the whole group; else single-select.
+    if (!selection.has(id)) selectSingle(id);
+    render();
+    const ids = (selection.size > 1 && selection.has(id)) ? [...selection] : [id];
+    const starts = {};
+    for (const i of ids) starts[i] = { x: map.rooms[i].x, y: map.rooms[i].y };
+    drag = { type:"move", ids, clickId:id, starts, moved:false, x0:e.clientX, y0:e.clientY };
+    e.preventDefault(); return;
+  }
+  // Shift-drag on empty space = marquee box-select; otherwise pan.
+  if (e.shiftKey) {
+    drag = { type:"marquee", x0:e.clientX, y0:e.clientY };
+    const m = document.getElementById("marquee");
+    m.style.display = "block"; m.style.left = e.clientX + "px"; m.style.top = e.clientY + "px";
+    m.style.width = "0px"; m.style.height = "0px";
+    e.preventDefault(); return;
+  }
+  drag = { type:"pan", x0:e.clientX, y0:e.clientY, px:panX, py:panY, moved:false };
+  viewport.classList.add("panning");
+});
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+  if (drag.type === "pan") {
+    if (Math.abs(dx) > CLICK_THRESH || Math.abs(dy) > CLICK_THRESH) drag.moved = true;
+    panX = drag.px + dx; panY = drag.py + dy; applyTransform();
+  } else if (drag.type === "move") {
+    if (Math.abs(dx) > CLICK_THRESH || Math.abs(dy) > CLICK_THRESH) drag.moved = true;
+    const wdx = dx / scale, wdy = dy / scale;
+    for (const id of drag.ids) {
+      const el = world.querySelector(`.room[data-id="${id}"]`);
+      if (!el) continue;
+      const s = drag.starts[id];
+      el.style.left = (s.x * CELL + CELL/2 + wdx) + "px";
+      el.style.top = (s.y * CELL + CELL/2 + wdy) + "px";
+    }
+  } else if (drag.type === "marquee") {
+    const x = Math.min(e.clientX, drag.x0), y = Math.min(e.clientY, drag.y0);
+    const m = document.getElementById("marquee");
+    m.style.left = x + "px"; m.style.top = y + "px";
+    m.style.width = Math.abs(e.clientX - drag.x0) + "px";
+    m.style.height = Math.abs(e.clientY - drag.y0) + "px";
+    m.classList.toggle("all", e.altKey);   // Alt = select across all layers
+  } else if (drag.type === "area-draw") {
+    const x = Math.min(e.clientX, drag.x0), y = Math.min(e.clientY, drag.y0);
+    const m = document.getElementById("marquee");
+    m.style.left = x + "px"; m.style.top = y + "px";
+    m.style.width = Math.abs(e.clientX - drag.x0) + "px";
+    m.style.height = Math.abs(e.clientY - drag.y0) + "px";
+  } else if (drag.type === "area-move") {
+    const ddx = Math.round(dx/scale/CELL), ddy = Math.round(dy/scale/CELL);
+    const el = world.querySelector(`.area[data-aid="${drag.aid}"]`);
+    if (el) { el.style.left = ((drag.sx + ddx) * CELL) + "px"; el.style.top = ((drag.sy + ddy) * CELL) + "px"; }
+  } else if (drag.type === "area-resize") {
+    const ddx = Math.round(dx/scale/CELL), ddy = Math.round(dy/scale/CELL);
+    const el = world.querySelector(`.area[data-aid="${drag.aid}"]`);
+    if (el) { el.style.width = (Math.max(1, drag.sw + ddx) * CELL) + "px"; el.style.height = (Math.max(1, drag.sh + ddy) * CELL) + "px"; }
+  } else if (drag.type === "link") {
+    const a = roomWorldCenter(map.rooms[drag.fromId]);
+    const w1 = screenToWorld(e.clientX, e.clientY);
+    updateGhostLine(drag.ghost, a.x, a.y, w1.x, w1.y);
+    const overEl = document.elementFromPoint(e.clientX, e.clientY);
+    const overRoom = overEl && overEl.closest(".room:not(.ghost)");
+    world.querySelectorAll(".room.linktarget").forEach(x=>x.classList.remove("linktarget"));
+    if (overRoom && overRoom.dataset.id !== drag.fromId) overRoom.classList.add("linktarget");
+  }
+});
+window.addEventListener("mouseup", e => {
+  if (!drag) return;
+  const d = drag; drag = null; viewport.classList.remove("panning");
+  if (d.type === "pan") {
+    if (!d.moved) {
+      if (linkMode) { if (pendingLink) setPending(null); return; } // empty click cancels pending link
+      if (pathMode) { if (pathStart) { pathStart = null; setPathHint(); render(); } return; }
+      // plain click on empty space just clears the selection (double-click to create a room)
+      if (selection.size || selectedId || selectedAreaId) { clearSelection(); selectedAreaId = null; render(); }
+    }
+    return;
+  }
+  if (d.type === "marquee") {
+    document.getElementById("marquee").style.display = "none";
+    const a = screenToWorld(Math.min(e.clientX, d.x0), Math.min(e.clientY, d.y0));
+    const b = screenToWorld(Math.max(e.clientX, d.x0), Math.max(e.clientY, d.y0));
+    const allLayers = e.altKey;
+    const pool = allLayers ? Object.values(map.rooms) : roomsOnLayer(map.currentLayer);
+    const hits = pool.filter(r => {
+      const c = roomWorldCenter(r);
+      return c.x >= a.x && c.x <= b.x && c.y >= a.y && c.y <= b.y;
+    });
+    selection = new Set(hits.map(r => r.id));
+    selectedId = hits.length ? hits[hits.length - 1].id : null;
+    // when grabbing across layers, hop to the primary's layer so the selection is visible
+    if (allLayers && selectedId) map.currentLayer = map.rooms[selectedId].z;
+    render(); return;
+  }
+  if (d.type === "area-draw") {
+    const m = document.getElementById("marquee"); m.style.display = "none"; m.classList.remove("areadraw");
+    const a = screenToWorld(Math.min(e.clientX, d.x0), Math.min(e.clientY, d.y0));
+    const b = screenToWorld(Math.max(e.clientX, d.x0), Math.max(e.clientY, d.y0));
+    const x0 = clamp(Math.floor(a.x / CELL), 0, GRID_N-1), y0 = clamp(Math.floor(a.y / CELL), 0, GRID_N-1);
+    const x1 = clamp(Math.floor(b.x / CELL), 0, GRID_N-1), y1 = clamp(Math.floor(b.y / CELL), 0, GRID_N-1);
+    const ar = { id: uid(), name: "Area", color: "Teal",
+                 x: Math.min(x0,x1), y: Math.min(y0,y1), w: Math.abs(x1-x0)+1, h: Math.abs(y1-y0)+1 };
+    map.areas.push(ar); selectedAreaId = ar.id; clearSelection();
+    commit(); render();
+    return;
+  }
+  if (d.type === "area-move") {
+    const ar = map.areas.find(a => a.id === d.aid);
+    if (ar) {
+      const ddx = Math.round((e.clientX - d.x0)/scale/CELL), ddy = Math.round((e.clientY - d.y0)/scale/CELL);
+      ar.x = clamp(d.sx + ddx, 0, GRID_N - ar.w); ar.y = clamp(d.sy + ddy, 0, GRID_N - ar.h);
+      if (ddx || ddy) commit();
+    }
+    render(); return;
+  }
+  if (d.type === "area-resize") {
+    const ar = map.areas.find(a => a.id === d.aid);
+    if (ar) {
+      const ddx = Math.round((e.clientX - d.x0)/scale/CELL), ddy = Math.round((e.clientY - d.y0)/scale/CELL);
+      ar.w = clamp(d.sw + ddx, 1, GRID_N - ar.x); ar.h = clamp(d.sh + ddy, 1, GRID_N - ar.y);
+      if (ddx || ddy) commit();
+    }
+    render(); return;
+  }
+  if (d.type === "move") {
+    if (!d.moved) {
+      // plain click without dragging: collapse a multi-selection to just the clicked room
+      if (selection.size > 1) { selectSingle(d.clickId); render(); }
+      else render();
+      return;
+    }
+    const ddx = Math.round((e.clientX - d.x0) / scale / CELL);
+    const ddy = Math.round((e.clientY - d.y0) / scale / CELL);
+    const selSet = new Set(d.ids);
+    let ok = (ddx !== 0 || ddy !== 0);
+    for (const id of d.ids) {
+      const nx = d.starts[id].x + ddx, ny = d.starts[id].y + ddy;
+      if (nx < 0 || ny < 0 || nx >= GRID_N || ny >= GRID_N) { ok = false; break; }
+      const occ = roomAtCell(map.rooms[id].z, nx, ny);
+      if (occ && !selSet.has(occ.id)) { ok = false; break; }
+    }
+    if (ok) {
+      for (const id of d.ids) { map.rooms[id].x = d.starts[id].x + ddx; map.rooms[id].y = d.starts[id].y + ddy; }
+      commit();
+    }
+    render(); return;   // if not ok, render() snaps everything back to stored positions
+  }
+  if (d.type === "link") {
+    if (d.ghost) d.ghost.remove();
+    world.querySelectorAll(".room.linktarget").forEach(x=>x.classList.remove("linktarget"));
+    const overEl = document.elementFromPoint(e.clientX, e.clientY);
+    const overRoom = overEl && overEl.closest(".room:not(.ghost)");
+    if (overRoom && overRoom.dataset.id !== d.fromId) openDirPicker(d.fromId, overRoom.dataset.id, e.clientX, e.clientY);
+    return;
+  }
+});
+viewport.addEventListener("click", e => {
+  const badge = e.target.closest(".vbadge");
+  if (badge) {
+    const r = map.rooms[badge.closest(".room").dataset.id];
+    const dir = badge.dataset.vbadge === "up" ? "UP" : "DOWN";
+    if (r.exits[dir]) gotoRoom(r.exits[dir]);
+    e.stopPropagation();
+  }
+});
+// double-click an empty cell to create a room (single click no longer creates)
+viewport.addEventListener("dblclick", e => {
+  if (view !== "flat" || linkMode || pathMode || areaMode) return;
+  if (e.target.closest(".room:not(.ghost)")) return;
+  const w = screenToWorld(e.clientX, e.clientY);
+  const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
+  if (cx >= 0 && cy >= 0 && cx < GRID_N && cy < GRID_N && !roomAtCell(map.currentLayer, cx, cy)) {
+    const r = createRoom(map.currentLayer, cx, cy, "New Room");
+    selectSingle(r.id); commit(); render();
+  }
+});
+
+function makeGhostLine() {
+  const ns = "http://www.w3.org/2000/svg";
+  const l = document.createElementNS(ns, "line");
+  l.setAttribute("stroke", "#46c46e"); l.setAttribute("stroke-width", "3");
+  l.setAttribute("stroke-dasharray", "6,4"); svg.appendChild(l); return l;
+}
+function updateGhostLine(l, x1, y1, x2, y2) {
+  l.setAttribute("x1", x1); l.setAttribute("y1", y1); l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+}
+
+// ---------- Direction picker ----------
+let pickerCtx = null;
+function buildDirGrid() {
+  dirGrid.innerHTML = "";
+  ["NW","N","NE","W",null,"E","SW","S","SE"].forEach(d => {
+    const b = document.createElement("button");
+    if (d === null) { b.disabled = true; b.textContent="·"; }
+    else { b.textContent = d; b.dataset.dir = d; }
+    dirGrid.appendChild(b);
+  });
+  const ud = document.createElement("div");
+  ud.style.gridColumn = "1 / -1"; ud.style.display = "flex"; ud.style.gap = "5px"; ud.style.marginTop="5px";
+  ["UP","DOWN"].forEach(d => {
+    const b = document.createElement("button");
+    b.textContent = d; b.dataset.dir = d; b.style.flex = "1"; ud.appendChild(b);
+  });
+  dirGrid.appendChild(ud);
+}
+function openDirPicker(fromId, toId, sx, sy) {
+  pickerCtx = { fromId, toId }; buildDirGrid();
+  const from = map.rooms[fromId], to = map.rooms[toId];
+  document.getElementById("dirHdr").innerHTML =
+    `Which way does<br><b>${escapeHtml(from.name)}</b> exit to <b>${escapeHtml(to.name)}</b>?`;
+  dirpicker.style.display = "block";
+  const w = dirpicker.offsetWidth, h = dirpicker.offsetHeight;
+  dirpicker.style.left = clamp(sx, 0, window.innerWidth - w - 8) + "px";
+  dirpicker.style.top = clamp(sy, 0, window.innerHeight - h - 8) + "px";
+}
+function closeDirPicker() { dirpicker.style.display = "none"; pickerCtx = null; }
+dirGrid.addEventListener("click", e => {
+  const b = e.target.closest("button[data-dir]");
+  if (!b || !pickerCtx) return;
+  const res = addExit(pickerCtx.fromId, b.dataset.dir, pickerCtx.toId);
+  if (!res.ok) { alert(res.msg); return; }
+  closeDirPicker();
+  if (pendingLink) setPending(null);
+  commit(); render();
+});
+document.addEventListener("mousedown", e => {
+  if (dirpicker.style.display === "block" && !dirpicker.contains(e.target)) closeDirPicker();
+});
+
+// ---------- Wheel zoom ----------
+viewport.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1/1.12);
+}, { passive: false });
+
+// ---------- 3D view interaction (orbit / zoom / click-select) ----------
+view3dEl.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  drag3d = { x0: e.clientX, y0: e.clientY, yaw: cam3d.yaw, pitch: cam3d.pitch, moved: false };
+  view3dEl.classList.add("dragging");
+  e.preventDefault();
+});
+window.addEventListener("mousemove", e => {
+  if (!drag3d) return;
+  const dx = e.clientX - drag3d.x0, dy = e.clientY - drag3d.y0;
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag3d.moved = true;
+  cam3d.yaw = drag3d.yaw + dx * 0.01;
+  cam3d.pitch = clamp(drag3d.pitch + dy * 0.01, -1.4, 1.4);
+  render3d();
+});
+window.addEventListener("mouseup", e => {
+  if (!drag3d) return;
+  const d = drag3d; drag3d = null;
+  view3dEl.classList.remove("dragging");
+  if (!d.moved) {
+    const rect = view3dEl.getBoundingClientRect();
+    const id = pick3d(e.clientX - rect.left, e.clientY - rect.top);
+    if (id) { selectSingle(id); render(); }
+    else { clearSelection(); render(); }
+  }
+});
+view3dEl.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam3d.dist = clamp(cam3d.dist * (e.deltaY < 0 ? 1/1.12 : 1.12), 200, 12000);
+  render3d();
+}, { passive: false });
+
+// ---------- Keyboard ----------
+const KEYCARVE = { q:"NW", w:"N", e:"NE", a:"W", d:"E", z:"SW", x:"S", c:"SE", r:"UP", f:"DOWN" };
+window.addEventListener("keydown", e => {
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  // Undo / redo (global, works with or without a selection)
+  if (e.ctrlKey || e.metaKey) {
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
+    if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); return; }
+  }
+  if (e.key === "Escape") {
+    if (pendingLink) setPending(null);
+    if (pathMode) clearPath();
+    selectedAreaId = null;
+    clearSelection(); closeDirPicker(); render(); return;
+  }
+  if (e.key === "Delete" || e.key === "Backspace") {
+    if (selectedAreaId) {
+      const a = map.areas.find(x => x.id === selectedAreaId);
+      if (a && confirm(`Delete area "${a.name}"?`)) { deleteArea(selectedAreaId); commit(); render(); }
+      e.preventDefault(); return;
+    }
+    if (selection.size > 1) {
+      if (confirm(`Delete ${selection.size} selected rooms?`)) {
+        for (const id of [...selection]) deleteRoom(id);
+        clearSelection(); commit(); render();
+      }
+      e.preventDefault(); return;
+    }
+    if (selectedId) {
+      const r = map.rooms[selectedId];
+      if (r && confirm(`Delete "${r.name}"?`)) { deleteRoom(selectedId); commit(); render(); }
+      e.preventDefault(); return;
+    }
+    return;
+  }
+  if (!selectedId) return;
+  const k = e.key.toLowerCase();
+  if (view === "flat") {
+    // centre of the rose = vertical axis: S = up, Shift+S = down
+    if (k === "s") { carve(selectedId, e.shiftKey ? "DOWN" : "UP"); e.preventDefault(); return; }
+    if (KEYCARVE[k]) { carve(selectedId, KEYCARVE[k]); e.preventDefault(); }
+  }
+});
+
+// ---------- Toolbar wiring ----------
+function updateViewButtons() {
+  document.querySelectorAll("#viewseg button").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+}
+document.querySelectorAll("#viewseg button").forEach(b => {
+  b.onclick = () => { view = b.dataset.view; updateViewButtons(); render(); };
+});
+document.getElementById("layerUp").onclick = () => stepLayer(+1);
+document.getElementById("layerDown").onclick = () => stepLayer(-1);
+// Link and Path are mutually exclusive interaction modes.
+function setMode(mode) {
+  linkMode = (mode === "link");
+  pathMode = (mode === "path");
+  areaMode = (mode === "area");
+  if (!linkMode) setPending(null);
+  if (!pathMode) pathStart = null;
+  if (!areaMode && selectedAreaId) { selectedAreaId = null; }
+  document.getElementById("linkBtn").classList.toggle("active", linkMode);
+  document.getElementById("pathBtn").classList.toggle("active", pathMode);
+  document.getElementById("areaBtn").classList.toggle("active", areaMode);
+  viewport.classList.toggle("linkmode", linkMode || pathMode);
+  viewport.classList.toggle("areamode", areaMode);
+  if (pathMode) setPathHint();
+  render();
+}
+document.getElementById("linkBtn").onclick = () => setMode(linkMode ? "none" : "link");
+document.getElementById("pathBtn").onclick = () => setMode(pathMode ? "none" : "path");
+document.getElementById("areaBtn").onclick = () => setMode(areaMode ? "none" : "area");
+document.getElementById("searchBox").addEventListener("input", e => runSearch(e.target.value));
+document.getElementById("searchBox").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); jumpNextMatch(); }
+});
+document.getElementById("undoBtn").onclick = undo;
+document.getElementById("redoBtn").onclick = redo;
+
+// ---------- Legend & onion popovers ----------
+function positionPopover(panel, btn) {
+  const r = btn.getBoundingClientRect();
+  panel.style.display = "block";
+  const w = panel.offsetWidth, h = panel.offsetHeight;
+  panel.style.left = clamp(r.left, 8, window.innerWidth - w - 8) + "px";
+  panel.style.top = clamp(r.bottom + 6, 8, window.innerHeight - h - 8) + "px";
+}
+// ---------- Stats helpers ----------
+function colorCounts() {
+  const c = {}; for (const p of PALETTE) c[p.name] = 0;
+  for (const r of Object.values(map.rooms)) c[r.color] = (c[r.color] || 0) + 1;
+  return c;
+}
+function roomsInArea(ar) {
+  return Object.values(map.rooms).filter(r =>
+    r.x >= ar.x && r.x < ar.x + ar.w && r.y >= ar.y && r.y < ar.y + ar.h).length;
+}
+function connectionCount() {
+  const seen = new Set();
+  for (const r of Object.values(map.rooms))
+    for (const d of DIRS) { const t = r.exits[d]; if (t && map.rooms[t]) seen.add([r.id, t].sort().join("|")); }
+  return seen.size;
+}
+
+function buildLegend() {
+  const rows = document.getElementById("legendRows");
+  const cc = colorCounts();
+  rows.innerHTML = "";
+  for (const p of PALETTE) {
+    const row = document.createElement("div");
+    row.className = "legendrow";
+    const sw = document.createElement("div");
+    sw.className = "sw"; sw.style.background = p.c;
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.placeholder = p.name; inp.value = map.tagLabels[p.name] || "";
+    inp.addEventListener("input", () => { map.tagLabels[p.name] = inp.value; save(); });
+    inp.addEventListener("change", () => { commit(); render(); });
+    const cnt = document.createElement("span");
+    cnt.className = "cnt"; cnt.textContent = cc[p.name]; cnt.title = cc[p.name] + " room(s) with this tag";
+    row.appendChild(sw); row.appendChild(inp); row.appendChild(cnt); rows.appendChild(row);
+  }
+}
+function buildStats() {
+  const el = document.getElementById("statsBody");
+  const rooms = Object.values(map.rooms);
+  const layers = layersPresent();
+  const cc = colorCounts();
+  const plur = (n, w) => `<b>${n}</b> ${w}${n === 1 ? "" : "s"}`;
+  let h = `<div class="statline">${plur(rooms.length,"room")} · ${plur(map.areas.length,"area")} · ${plur(layers.length,"layer")} · ${plur(connectionCount(),"connection")}</div>`;
+  h += `<div class="stathdr">Rooms per layer</div>`;
+  for (const z of layers) h += `<div class="statrow"><span>Layer ${z}</span><span class="val">${roomsOnLayer(z).length}</span></div>`;
+  const tagged = PALETTE.filter(p => cc[p.name] > 0);
+  if (tagged.length) {
+    h += `<div class="stathdr">By colour tag</div>`;
+    for (const p of tagged) {
+      const lbl = map.tagLabels[p.name] || p.name;
+      h += `<div class="statrow"><span><span class="dot" style="background:${p.c}"></span>${escapeHtml(lbl)}</span><span class="val">${cc[p.name]}</span></div>`;
+    }
+  }
+  if (map.areas.length) {
+    h += `<div class="stathdr">Rooms per area</div>`;
+    for (const ar of map.areas) h += `<div class="statrow"><span><span class="dot" style="background:${areaHex(ar)}"></span>${escapeHtml(ar.name)}</span><span class="val">${roomsInArea(ar)}</span></div>`;
+  }
+  el.innerHTML = h;
+}
+document.getElementById("legendBtn").onclick = () => {
+  const panel = document.getElementById("legendPanel");
+  if (panel.style.display === "block") { panel.style.display = "none"; return; }
+  buildLegend();
+  positionPopover(panel, document.getElementById("legendBtn"));
+};
+function syncOnionControls() {
+  document.getElementById("onionBelow").checked = onion.below;
+  document.getElementById("onionAbove").checked = onion.above;
+  document.getElementById("onionOpacity").value = onion.opacity;
+}
+document.getElementById("onionBtn").onclick = () => {
+  const panel = document.getElementById("onionPanel");
+  if (panel.style.display === "block") { panel.style.display = "none"; return; }
+  syncOnionControls();
+  positionPopover(panel, document.getElementById("onionBtn"));
+};
+document.getElementById("onionBelow").onchange = e => { onion.below = e.target.checked; savePrefs(); render(); };
+document.getElementById("onionAbove").onchange = e => { onion.above = e.target.checked; savePrefs(); render(); };
+document.getElementById("onionOpacity").oninput = e => { onion.opacity = parseFloat(e.target.value); savePrefs(); render(); };
+document.getElementById("statsBtn").onclick = () => {
+  const panel = document.getElementById("statsPanel");
+  if (panel.style.display === "block") { panel.style.display = "none"; return; }
+  buildStats();
+  positionPopover(panel, document.getElementById("statsBtn"));
+};
+document.querySelectorAll(".popclose").forEach(b => {
+  b.onclick = () => { document.getElementById(b.dataset.close).style.display = "none"; };
+});
+// close popovers when clicking elsewhere
+const POPS = { legendPanel: "legendBtn", onionPanel: "onionBtn", statsPanel: "statsBtn" };
+document.addEventListener("mousedown", e => {
+  for (const id of Object.keys(POPS)) {
+    const panel = document.getElementById(id);
+    const btn = document.getElementById(POPS[id]);
+    if (panel.style.display === "block" && !panel.contains(e.target) && e.target !== btn && !btn.contains(e.target))
+      panel.style.display = "none";
+  }
+});
+document.getElementById("zoomIn").onclick = () => {
+  if (view === "3d") { cam3d.dist = clamp(cam3d.dist / 1.2, 200, 12000); render3d(); return; }
+  const r = viewport.getBoundingClientRect(); zoomAt(r.left+r.width/2, r.top+r.height/2, 1.2);
+};
+document.getElementById("zoomOut").onclick = () => {
+  if (view === "3d") { cam3d.dist = clamp(cam3d.dist * 1.2, 200, 12000); render3d(); return; }
+  const r = viewport.getBoundingClientRect(); zoomAt(r.left+r.width/2, r.top+r.height/2, 1/1.2);
+};
+document.getElementById("zoomReset").onclick = () => {
+  if (view === "3d") {
+    // recenter & reframe the orbit camera to the default ¾ view
+    cam3d.yaw = 0.7; cam3d.pitch = 0.5; cam3d.fitted = false;
+    render3d();
+    return;
+  }
+  scale = 1;
+  const sel = selectedId && map.rooms[selectedId];
+  if (sel && sel.z === map.currentLayer) centerOnRoom(sel);
+  else { const rooms = roomsOnLayer(map.currentLayer); rooms.length ? centerOnRoom(rooms[0]) : centerCellView(GRID_N/2, GRID_N/2); }
+};
+
+document.getElementById("exportBtn").onclick = () => {
+  const blob = new Blob([JSON.stringify(map, null, 2)], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "mush-map-" + new Date().toISOString().slice(0,10) + ".json";
+  a.click(); URL.revokeObjectURL(a.href);
+};
+document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data.rooms) throw new Error("Not a valid map file (no rooms).");
+      if (!confirm("Import will replace the current map. Continue?")) return;
+      map = data; normalize(); clearSelection();
+      resetHistory(); save(); render(); fitInitial();
+    } catch (err) { alert("Import failed: " + err.message); }
+  };
+  reader.readAsText(file); e.target.value = "";
+};
+document.getElementById("newMapBtn").onclick = () => {
+  if (!confirm("Start a new empty map? This clears the current map (export first if you want a backup).")) return;
+  map = defaultMap(); clearSelection(); scale = 1; resetHistory(); save(); render(); centerCellView(GRID_N/2, GRID_N/2);
+};
+
+// ---------- Init ----------
+function fitInitial() {
+  const rooms = roomsOnLayer(map.currentLayer);
+  rooms.length ? centerOnRoom(rooms[0]) : centerCellView(GRID_N/2, GRID_N/2);
+}
+window.addEventListener("resize", () => {
+  resizeCanvas();
+  if (view === "3d") { resize3d(); render3d(); }
+});
+
+load();
+loadPrefs();
+resetHistory();
+resizeCanvas();
+updateViewButtons();
+render();
+fitInitial();
+</script>
+</body>
+</html>
