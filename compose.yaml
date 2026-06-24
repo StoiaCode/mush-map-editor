@@ -2,6 +2,7 @@ services:
   mush-map-editor:
     build: .
     image: mush-map-editor
+    pull_policy: build
     container_name: mush-map-editor
     restart: unless-stopped
     # No published ports; the reverse proxy reaches this container by name on port 80.
