@@ -123,6 +123,7 @@
   .vbadge:hover { background: var(--accent); }
   .vbadge.up { top: -9px; right: -9px; }
   .vbadge.down { bottom: -9px; right: -9px; }
+  .vbadge.fly { border-color: #3cc4b8; color: #3cc4b8; }
 
   .exitlabel {
     font-size: 10px; fill: var(--muted); font-weight: 700;
@@ -164,6 +165,8 @@
   .exitrow .tgt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   .exitrow .tgt:hover { color: var(--accent); text-decoration: underline; }
   .exitrow button { padding: 2px 6px; font-size: 11px; }
+  .flytoggle { opacity: .4; }
+  .flytoggle.on { opacity: 1; color: #3cc4b8; border-color: #3cc4b8; }
 
   /* 3D view */
   #canvas3d { flex: 1; min-width: 0; min-height: 0; display: none; cursor: grab; background:
@@ -240,6 +243,9 @@
   .pathwords { font-weight: 700; }
   .pathcopy { padding: 1px 6px; font-size: 11px; font-weight: 400; }
   .pathsep { color: var(--muted); margin: 0 2px; }
+  .flystep { color: #3cc4b8; }
+  .flystep::after { content: "\2708"; font-size: .8em; margin-left: 2px; opacity: .9; }
+  #pathResult .flychk { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin: 4px 0; cursor: pointer; }
   #pathResult button { margin-top: 4px; }
   .hint { color: var(--muted); font-size: 11px; }
   .statuschip { font-size: 11px; color: var(--muted); }
@@ -379,6 +385,8 @@ let pathStart = null;      // start room id while picking a path destination
 let areaMode = false;      // drawing/editing zone rectangles
 let selectedAreaId = null; // currently selected area (separate from room selection)
 let pathRooms = new Set(); // rooms on the current shortest-path result (highlighted)
+let pathCanFly = true;     // pathfinder may use flight-only exits
+let pathLast = null;       // {startId, endId} of the last computed route, for recompute on toggle
 let searchTerm = "";
 let searchMatches = [];    // ids of rooms matching the search
 let searchIdx = -1;        // cursor for "jump to next match"
@@ -464,6 +472,7 @@ function normalize() {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);
     delete r.level;
     if (!r.exits) r.exits = {};
+    if (!r.exitFly) r.exitFly = {};   // directions on this room that require flight
   }
   if (map.currentLayer == null) map.currentLayer = layersPresent()[0];
   // backfill tag labels (older saves / imports won't have them)
@@ -541,7 +550,7 @@ function roomAtCell(z, x, y) {
 function createRoom(z, x, y, name) {
   const id = uid();
   map.rooms[id] = { id, name: name || "New Room", description: "", color: "Slate",
-                    size: "medium", x, y, z, exits: {} };
+                    size: "medium", x, y, z, exits: {}, exitFly: {} };
   return map.rooms[id];
 }
 function deleteRoom(id) {
@@ -587,6 +596,19 @@ function addExit(fromId, dir, toId) {
   from.exits[dir] = toId;
   to.exits[opp] = fromId;
   return { ok:true };
+}
+
+// Mark/unmark an exit (and its reciprocal, if any) as flight-only.
+function setExitFly(roomId, dir, fly) {
+  const r = map.rooms[roomId];
+  if (!r || !r.exits[dir]) return;
+  if (!r.exitFly) r.exitFly = {};
+  if (fly) r.exitFly[dir] = true; else delete r.exitFly[dir];
+  const t = map.rooms[r.exits[dir]];
+  if (t) {
+    if (!t.exitFly) t.exitFly = {};
+    for (const d of DIRS) if (t.exits[d] === roomId) { if (fly) t.exitFly[d] = true; else delete t.exitFly[d]; }
+  }
 }
 
 // Carve: works for all 10 directions.
@@ -760,7 +782,8 @@ function renderFlat() {
   for (const exits of pairs.values()) {
     const A = exits[0].from, B = exits[0].to;
     const ca = roomWorldCenter(A), cb = roomWorldCenter(B);
-    drawConnector(ca.x, ca.y, cb.x, cb.y);
+    const fly = exits.some(ex => ex.from.exitFly && ex.from.exitFly[ex.dir]);
+    drawConnector(ca.x, ca.y, cb.x, cb.y, fly);
     const adjacent = Math.max(Math.abs(A.x - B.x), Math.abs(A.y - B.y)) === 1;
     const cleanTwoWay = exits.length === 2 && exits[1].dir === OPP[exits[0].dir];
     // A normal two-way link between touching cells needs no label — direction is obvious.
@@ -819,22 +842,26 @@ function makeRoomEl(r, ghost) {
   el.title = r.name + (tag ? "  ·  " + tag : "");
   el.innerHTML = `<span class="rname">${escapeHtml(r.name)}</span>`;
   if (!ghost) {
-    if (r.exits.UP)   el.appendChild(vbadge("up", "↑"));
-    if (r.exits.DOWN) el.appendChild(vbadge("down", "↓"));
+    if (r.exits.UP)   el.appendChild(vbadge("up", "↑", r.exitFly && r.exitFly.UP));
+    if (r.exits.DOWN) el.appendChild(vbadge("down", "↓", r.exitFly && r.exitFly.DOWN));
   }
   return el;
 }
-function vbadge(kind, ch) {
+function vbadge(kind, ch, fly) {
   const b = document.createElement("div");
-  b.className = "vbadge " + kind; b.textContent = ch; b.dataset.vbadge = kind;
+  b.className = "vbadge " + kind + (fly ? " fly" : "");
+  b.textContent = ch; b.dataset.vbadge = kind;
+  if (fly) b.title = "flight-only";
   return b;
 }
-function drawConnector(x1, y1, x2, y2) {
+function drawConnector(x1, y1, x2, y2, fly) {
   const ns = "http://www.w3.org/2000/svg";
   const line = document.createElementNS(ns, "line");
   line.setAttribute("x1", x1); line.setAttribute("y1", y1);
   line.setAttribute("x2", x2); line.setAttribute("y2", y2);
-  line.setAttribute("stroke", "#4a5566"); line.setAttribute("stroke-width", "2.5");
+  line.setAttribute("stroke", fly ? "#3cc4b8" : "#4a5566");
+  line.setAttribute("stroke-width", "2.5");
+  if (fly) line.setAttribute("stroke-dasharray", "6,5");
   svg.appendChild(line);
 }
 // Label placed near the SOURCE room so a reciprocal pair's two labels sit at
@@ -950,17 +977,20 @@ function render3d() {
       const t = map.rooms[r.exits[dir]];
       if (!t) continue;
       const key = [r.id, t.id].sort().join("|");
-      if (!pairs.has(key)) pairs.set(key, { a: r, b: t, vertical: (dir === "UP" || dir === "DOWN") });
-      else if (dir === "UP" || dir === "DOWN") pairs.get(key).vertical = true;
+      const fly = !!(r.exitFly && r.exitFly[dir]);
+      if (!pairs.has(key)) pairs.set(key, { a: r, b: t, vertical: (dir === "UP" || dir === "DOWN"), fly });
+      else { const p = pairs.get(key); if (dir === "UP" || dir === "DOWN") p.vertical = true; if (fly) p.fly = true; }
     }
   }
-  for (const { a, b, vertical } of pairs.values()) {
+  for (const { a, b, vertical, fly } of pairs.values()) {
     const pa = pr[a.id], pb = pr[b.id];
     if (!pa || !pb) continue;
-    ctx3d.strokeStyle = vertical ? "rgba(91,157,255,0.85)" : "rgba(140,150,165,0.55)";
-    ctx3d.lineWidth = vertical ? 2.5 : 1.5;
+    ctx3d.strokeStyle = fly ? "rgba(60,196,184,0.9)" : (vertical ? "rgba(91,157,255,0.85)" : "rgba(140,150,165,0.55)");
+    ctx3d.lineWidth = (vertical || fly) ? 2.5 : 1.5;
+    ctx3d.setLineDash(fly ? [6, 5] : []);
     ctx3d.beginPath(); ctx3d.moveTo(pa.sx, pa.sy); ctx3d.lineTo(pb.sx, pb.sy); ctx3d.stroke();
   }
+  ctx3d.setLineDash([]);
 
   // rooms, sorted far → near
   const order = rooms.filter(r => pr[r.id]).sort((r1, r2) => pr[r2.id].depth - pr[r1.id].depth);
@@ -1191,8 +1221,10 @@ function renderInspector() {
   for (const d of exitDirs) {
     const t = map.rooms[r.exits[d]];
     const tname = t ? t.name + (t.z !== r.z ? ` (L${t.z})` : "") : "??";
+    const fly = r.exitFly && r.exitFly[d];
     h += `<div class="exitrow"><span class="dir">${d}</span>
       <span class="tgt" data-goto="${r.exits[d]}">${escapeHtml(tname)}</span>
+      <button class="flytoggle${fly ? " on" : ""}" data-fly="${d}" title="Flight-only exit (requires flying)">✈</button>
       <button data-delexit="${d}">✕</button></div>`;
   }
   h += `</div>`;
@@ -1217,7 +1249,8 @@ function renderInspector() {
   document.getElementById("f_layer_up").onclick = () => changeRoomLayer(r, r.z + 1);
   document.getElementById("f_layer_dn").onclick = () => changeRoomLayer(r, r.z - 1);
   document.querySelectorAll("[data-carve]").forEach(b => b.onclick = () => carve(r.id, b.dataset.carve));
-  document.querySelectorAll("[data-delexit]").forEach(b => b.onclick = () => { delete r.exits[b.dataset.delexit]; commit(); render(); });
+  document.querySelectorAll("[data-delexit]").forEach(b => b.onclick = () => { delete r.exits[b.dataset.delexit]; delete r.exitFly[b.dataset.delexit]; commit(); render(); });
+  document.querySelectorAll("[data-fly]").forEach(b => b.onclick = () => { const d = b.dataset.fly; setExitFly(r.id, d, !(r.exitFly && r.exitFly[d])); commit(); render(); });
   document.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => gotoRoom(el.dataset.goto));
   document.getElementById("delRoom").onclick = () => {
     if (confirm(`Delete "${r.name}"? Exits referencing it will be removed. The cell is left empty.`)) { deleteRoom(r.id); commit(); render(); }
@@ -1268,9 +1301,9 @@ function jumpNextMatch() {
 const DIRWORD = { N:"north", NE:"northeast", E:"east", SE:"southeast", S:"south",
                   SW:"southwest", W:"west", NW:"northwest", UP:"up", DOWN:"down" };
 function roomName(id) { return map.rooms[id] ? map.rooms[id].name : "?"; }
-function findPath(startId, endId) {
+function findPath(startId, endId, allowFly) {
   if (startId === endId) return { steps: [], rooms: [startId] };
-  const prev = new Map();           // roomId -> { from, dir }
+  const prev = new Map();           // roomId -> { from, dir, fly }
   const visited = new Set([startId]);
   const queue = [startId];
   while (queue.length) {
@@ -1280,12 +1313,14 @@ function findPath(startId, endId) {
     for (const dir of DIRS) {
       const t = room.exits[dir];
       if (!t || visited.has(t) || !map.rooms[t]) continue;
+      const fly = !!(room.exitFly && room.exitFly[dir]);
+      if (fly && !allowFly) continue;   // grounded: skip flight-only exits
       visited.add(t);
-      prev.set(t, { from: cur, dir });
+      prev.set(t, { from: cur, dir, fly });
       if (t === endId) {
         const steps = [], rooms = [endId];
         let n = endId;
-        while (n !== startId) { const p = prev.get(n); steps.unshift(p.dir); rooms.unshift(p.from); n = p.from; }
+        while (n !== startId) { const p = prev.get(n); steps.unshift({ dir: p.dir, fly: p.fly }); rooms.unshift(p.from); n = p.from; }
         return { steps, rooms };
       }
       queue.push(t);
@@ -1294,36 +1329,43 @@ function findPath(startId, endId) {
   return null;
 }
 function computePath(startId, endId) {
-  const res = findPath(startId, endId);
+  pathLast = { startId, endId };
+  const res = findPath(startId, endId, pathCanFly);
   const box = document.getElementById("pathResult");
   box.style.display = "block";
+  const flyChk = `<label class="flychk"><input type="checkbox" id="pathFly"${pathCanFly ? " checked" : ""}> ✈ allow flight</label>`;
   if (!res) {
     pathRooms = new Set();
-    box.innerHTML = `<div><b>No route</b> from “${escapeHtml(roomName(startId))}” to “${escapeHtml(roomName(endId))}”.</div>` +
-      `<button id="pathClose">✕ close</button>`;
+    box.innerHTML = `<div><b>No ${pathCanFly ? "" : "ground "}route</b> from “${escapeHtml(roomName(startId))}” to “${escapeHtml(roomName(endId))}”.</div>` +
+      `<div>${flyChk}</div><button id="pathClose">✕ close</button>`;
   } else {
     pathRooms = new Set(res.rooms);
-    const words = res.steps.map(d => DIRWORD[d]);
+    const flyCount = res.steps.filter(s => s.fly).length;
     let dirsHtml;
-    if (!words.length) {
+    if (!res.steps.length) {
       dirsHtml = `<div class="pathdirs">(same room)</div>`;
     } else {
       // group into chunks of 5 (the MUSH movement-queue maximum), each copyable
       const groups = [];
-      for (let i = 0; i < words.length; i += 5) groups.push(words.slice(i, i + 5));
+      for (let i = 0; i < res.steps.length; i += 5) groups.push(res.steps.slice(i, i + 5));
       dirsHtml = `<div class="pathdirs">` + groups.map((g, i) => {
-        const text = g.join(" ");
+        const plain = g.map(s => DIRWORD[s.dir]).join(" ");   // copied text stays plain words
+        const shown = g.map(s => s.fly ? `<span class="flystep">${DIRWORD[s.dir]}</span>` : DIRWORD[s.dir]).join(" ");
         return (i > 0 ? `<span class="pathsep">|</span>` : "") +
-          `<span class="pathgroup"><span class="pathwords">${escapeHtml(text)}</span>` +
-          `<button class="pathcopy" data-copy="${escapeAttr(text)}" title="Copy these ${g.length} step${g.length !== 1 ? "s" : ""}">⧉</button></span>`;
+          `<span class="pathgroup"><span class="pathwords">${shown}</span>` +
+          `<button class="pathcopy" data-copy="${escapeAttr(plain)}" title="Copy these ${g.length} step${g.length !== 1 ? "s" : ""}">⧉</button></span>`;
       }).join("") + `</div>`;
     }
     box.innerHTML =
-      `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}</div>` +
+      `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}` +
+        (flyCount ? ` · <span class="flystep" style="font-weight:700">${flyCount} flown</span>` : "") + `</div>` +
       dirsHtml +
+      `<div>${flyChk}</div>` +
       `<button id="pathClose">✕ clear</button>`;
   }
   document.getElementById("pathClose").onclick = clearPath;
+  const fc = document.getElementById("pathFly");
+  if (fc) fc.onchange = () => { pathCanFly = fc.checked; if (pathLast) computePath(pathLast.startId, pathLast.endId); };
   box.querySelectorAll(".pathcopy").forEach(b => {
     b.onclick = () => copyText(b.dataset.copy).then(() => {
       const prev = b.textContent; b.textContent = "✓";
