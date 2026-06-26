@@ -233,7 +233,13 @@
     padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.6); display: none;
     max-width: 72%; z-index: 90; font-size: 12px;
   }
-  #pathResult .pathdirs { margin: 6px 0; font-weight: 700; color: #e87cc4; line-height: 1.4; }
+  #pathResult .pathdirs { margin: 6px 0; color: #e87cc4; line-height: 2; }
+  .pathgroup { display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(232,124,196,.12); border: 1px solid rgba(232,124,196,.35);
+    border-radius: 6px; padding: 2px 4px 2px 8px; margin: 3px 2px; }
+  .pathwords { font-weight: 700; }
+  .pathcopy { padding: 1px 6px; font-size: 11px; font-weight: 400; }
+  .pathsep { color: var(--muted); margin: 0 2px; }
   #pathResult button { margin-top: 4px; }
   .hint { color: var(--muted); font-size: 11px; }
   .statuschip { font-size: 11px; color: var(--muted); }
@@ -1297,14 +1303,43 @@ function computePath(startId, endId) {
       `<button id="pathClose">✕ close</button>`;
   } else {
     pathRooms = new Set(res.rooms);
-    const dirStr = res.steps.length ? res.steps.map(d => DIRWORD[d]).join(", ") : "(same room)";
+    const words = res.steps.map(d => DIRWORD[d]);
+    let dirsHtml;
+    if (!words.length) {
+      dirsHtml = `<div class="pathdirs">(same room)</div>`;
+    } else {
+      // group into chunks of 5 (the MUSH movement-queue maximum), each copyable
+      const groups = [];
+      for (let i = 0; i < words.length; i += 5) groups.push(words.slice(i, i + 5));
+      dirsHtml = `<div class="pathdirs">` + groups.map((g, i) => {
+        const text = g.join(" ");
+        return (i > 0 ? `<span class="pathsep">|</span>` : "") +
+          `<span class="pathgroup"><span class="pathwords">${escapeHtml(text)}</span>` +
+          `<button class="pathcopy" data-copy="${escapeAttr(text)}" title="Copy these ${g.length} step${g.length !== 1 ? "s" : ""}">⧉</button></span>`;
+      }).join("") + `</div>`;
+    }
     box.innerHTML =
       `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}</div>` +
-      `<div class="pathdirs">${escapeHtml(dirStr)}</div>` +
+      dirsHtml +
       `<button id="pathClose">✕ clear</button>`;
   }
   document.getElementById("pathClose").onclick = clearPath;
+  box.querySelectorAll(".pathcopy").forEach(b => {
+    b.onclick = () => copyText(b.dataset.copy).then(() => {
+      const prev = b.textContent; b.textContent = "✓";
+      setTimeout(() => { b.textContent = prev; }, 1000);
+    }).catch(() => {});
+  });
   render();
+}
+function copyText(t) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
+  return new Promise((res, rej) => {
+    const ta = document.createElement("textarea");
+    ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); res(); } catch (e) { rej(e); } finally { ta.remove(); }
+  });
 }
 function clearPath() {
   pathRooms = new Set(); pathStart = null;
