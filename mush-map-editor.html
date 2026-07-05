@@ -211,20 +211,18 @@
   #marquee.all { border: 1px dashed var(--good); background: rgba(70,196,110,.15); }
   #marquee.areadraw { border: 2px dashed var(--accent); background: rgba(91,157,255,.12); }
 
-  /* Areas (zone annotation rectangles) */
-  .area { position: absolute; border: 2px solid; border-radius: 6px; pointer-events: none; }
+  /* Areas (zone annotations; fill + outline drawn on the SVG layer, label/handle are DOM) */
   .area-label {
-    position: absolute; top: 0; left: 0; font-size: 11px; font-weight: 700; color: #11141a;
-    padding: 1px 7px; border-radius: 6px 0 6px 0; max-width: 100%;
+    position: absolute; font-size: 11px; font-weight: 700; color: #11141a; pointer-events: none;
+    padding: 1px 7px; border-radius: 6px 0 6px 0; max-width: 200px;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
+  .area-label.selected { outline: 2px solid var(--accent); }
   .area-resize {
-    position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px;
+    position: absolute; margin: -6px 0 0 -6px; width: 12px; height: 12px;
     background: #fff; border: 1px solid #333; border-radius: 2px; cursor: nwse-resize; display: none;
   }
-  .area.selected { box-shadow: 0 0 0 2px var(--accent); }
   #viewport.areamode { cursor: crosshair; }
-  #viewport.areamode .area { pointer-events: auto; cursor: move; }
   #viewport.areamode .room { pointer-events: none; }
   #viewport.areamode .area-resize { display: block; }
 
@@ -416,6 +414,7 @@ let pathMode = false;
 let pathStart = null;      // start room id while picking a path destination
 let areaMode = false;      // drawing/editing zone rectangles
 let selectedAreaId = null; // currently selected area (separate from room selection)
+let areaMergeSource = null; // area id awaiting a merge target (click another area)
 let pathRooms = new Set(); // rooms on the current shortest-path result (highlighted)
 let pathCanFly = true;     // pathfinder may use flight-only exits
 let pathLast = null;       // {startId, endId} of the last computed route, for recompute on toggle
@@ -500,6 +499,12 @@ function load() {
 function normalize() {
   if (!map.rooms) map.rooms = {};
   if (!Array.isArray(map.areas)) map.areas = [];
+  for (const a of map.areas) {
+    if (!Array.isArray(a.rects) || !a.rects.length) {
+      a.rects = [{ x: a.x || 0, y: a.y || 0, w: a.w || 1, h: a.h || 1 }];  // migrate legacy single-rect areas
+    }
+    delete a.x; delete a.y; delete a.w; delete a.h;
+  }
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);
     delete r.level;
@@ -775,11 +780,8 @@ function render() {
 
 function renderFlat() {
   world.querySelectorAll(".room").forEach(e => e.remove());
-  world.querySelectorAll(".area").forEach(e => e.remove());
+  world.querySelectorAll(".area-label, .area-resize").forEach(e => e.remove());
   const z = map.currentLayer;
-
-  // areas: behind everything (inserted before the SVG connector layer), shown on every layer
-  for (const ar of map.areas) world.insertBefore(makeAreaEl(ar), svg);
 
   // SVG connectors
   svg.setAttribute("width", WORLD); svg.setAttribute("height", WORLD);
@@ -787,6 +789,9 @@ function renderFlat() {
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
       <path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"></path>
     </marker></defs>`;
+
+  // areas: fill + outline on the SVG (behind connectors), shown on every layer; label + handle as DOM
+  for (const ar of map.areas) drawAreaFlat(ar);
 
   // --- onion-skin: neighbour layers ghosted behind everything, non-interactive ---
   if (onion.below) for (const r of roomsOnLayer(z - 1)) world.appendChild(makeRoomEl(r, "below"));
@@ -831,25 +836,51 @@ function renderFlat() {
   for (const r of roomsOnLayer(z)) world.appendChild(makeRoomEl(r, false));
 }
 
-function makeAreaEl(ar) {
-  const el = document.createElement("div");
-  el.className = "area" + (ar.id === selectedAreaId ? " selected" : "");
-  el.dataset.aid = ar.id;
-  el.style.left = (ar.x * CELL) + "px";
-  el.style.top = (ar.y * CELL) + "px";
-  el.style.width = (ar.w * CELL) + "px";
-  el.style.height = (ar.h * CELL) + "px";
+function drawAreaFlat(ar) {
+  const ns = "http://www.w3.org/2000/svg";
   const c = areaHex(ar);
-  el.style.background = hexA(c, 0.12);
-  el.style.borderColor = hexA(c, 0.7);
-  const lab = document.createElement("span");
-  lab.className = "area-label"; lab.textContent = ar.name;
+  const sel = ar.id === selectedAreaId;
+  const g = document.createElementNS(ns, "g");
+  g.setAttribute("class", "area-g"); g.dataset.aid = ar.id;
+  // fill: one rectangle subpath per rect (nonzero union avoids double-alpha on overlaps)
+  let fillD = "";
+  for (const rc of ar.rects) fillD += `M${rc.x*CELL},${rc.y*CELL}h${rc.w*CELL}v${rc.h*CELL}h${-rc.w*CELL}z`;
+  const fill = document.createElementNS(ns, "path");
+  fill.setAttribute("d", fillD); fill.setAttribute("fill", hexA(c, 0.12)); fill.setAttribute("fill-rule", "nonzero");
+  g.appendChild(fill);
+  // outline: boundary edges only (cells whose neighbour is outside the area)
+  const cells = areaCells(ar);
+  let outD = "";
+  for (const key of cells) {
+    const [cx, cy] = key.split(":").map(Number);
+    const x = cx*CELL, y = cy*CELL;
+    if (!cells.has(cx + ":" + (cy-1))) outD += `M${x},${y}h${CELL}`;
+    if (!cells.has(cx + ":" + (cy+1))) outD += `M${x},${y+CELL}h${CELL}`;
+    if (!cells.has((cx-1) + ":" + cy)) outD += `M${x},${y}v${CELL}`;
+    if (!cells.has((cx+1) + ":" + cy)) outD += `M${x+CELL},${y}v${CELL}`;
+  }
+  const out = document.createElementNS(ns, "path");
+  out.setAttribute("d", outD); out.setAttribute("fill", "none");
+  out.setAttribute("stroke", sel ? "#5b9dff" : hexA(c, 0.7));
+  out.setAttribute("stroke-width", sel ? 3 : 2);
+  g.appendChild(out);
+  svg.appendChild(g);
+  // label (DOM) at the top-left-most occupied cell
+  const anchor = areaLabelAnchor(ar);
+  const lab = document.createElement("div");
+  lab.className = "area-label" + (sel ? " selected" : "");
+  lab.dataset.aid = ar.id; lab.textContent = ar.name;
+  lab.style.left = (anchor.x*CELL) + "px"; lab.style.top = (anchor.y*CELL) + "px";
   lab.style.background = hexA(c, 0.85);
-  el.appendChild(lab);
-  const rz = document.createElement("div");
-  rz.className = "area-resize"; rz.dataset.aid = ar.id;
-  el.appendChild(rz);
-  return el;
+  world.appendChild(lab);
+  // resize handle (single-rect areas only), at that rect's bottom-right
+  if (ar.rects.length === 1) {
+    const rc = ar.rects[0];
+    const rz = document.createElement("div");
+    rz.className = "area-resize"; rz.dataset.aid = ar.id;
+    rz.style.left = ((rc.x+rc.w)*CELL) + "px"; rz.style.top = ((rc.y+rc.h)*CELL) + "px";
+    world.appendChild(rz);
+  }
 }
 // ghost: false (solid), or "below" / "above" for onion-skin neighbour layers.
 function makeRoomEl(r, ghost) {
@@ -1085,25 +1116,27 @@ function wrapLabel3d(text, maxW, maxLines) {
 }
 // translucent extruded box for an area, spanning yBot..yTop (all layers)
 function drawAreaSlab3d(ar, yTop, yBot) {
-  const x0 = ar.x * CELL, x1 = (ar.x + ar.w) * CELL;
-  const z0 = -ar.y * CELL, z1 = -(ar.y + ar.h) * CELL;   // grid-Y negated to match room3dWorld
-  const corners = [
-    [x0,yBot,z0],[x1,yBot,z0],[x1,yBot,z1],[x0,yBot,z1],  // bottom 0-3
-    [x0,yTop,z0],[x1,yTop,z0],[x1,yTop,z1],[x0,yTop,z1]   // top 4-7
-  ].map(c => project3d({ x:c[0], y:c[1], z:c[2] }));
-  if (corners.some(p => !p)) return;
   const c = areaHex(ar);
-  ctx3d.fillStyle = hexA(c, 0.10);
-  ctx3d.strokeStyle = hexA(c, 0.55);
-  ctx3d.lineWidth = 1.5;
   const faces = [[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
-  for (const f of faces) {
-    ctx3d.beginPath();
-    ctx3d.moveTo(corners[f[0]].sx, corners[f[0]].sy);
-    for (let i = 1; i < f.length; i++) ctx3d.lineTo(corners[f[i]].sx, corners[f[i]].sy);
-    ctx3d.closePath(); ctx3d.fill(); ctx3d.stroke();
+  let cxSum = 0, czSum = 0, n = 0;
+  for (const rc of ar.rects) {            // one translucent box per rectangle
+    const x0 = rc.x * CELL, x1 = (rc.x + rc.w) * CELL;
+    const z0 = -rc.y * CELL, z1 = -(rc.y + rc.h) * CELL;   // grid-Y negated to match room3dWorld
+    cxSum += (x0 + x1) / 2; czSum += (z0 + z1) / 2; n++;
+    const corners = [
+      [x0,yBot,z0],[x1,yBot,z0],[x1,yBot,z1],[x0,yBot,z1],
+      [x0,yTop,z0],[x1,yTop,z0],[x1,yTop,z1],[x0,yTop,z1]
+    ].map(p => project3d({ x:p[0], y:p[1], z:p[2] }));
+    if (corners.some(p => !p)) continue;
+    ctx3d.fillStyle = hexA(c, 0.10); ctx3d.strokeStyle = hexA(c, 0.55); ctx3d.lineWidth = 1.5;
+    for (const f of faces) {
+      ctx3d.beginPath();
+      ctx3d.moveTo(corners[f[0]].sx, corners[f[0]].sy);
+      for (let i = 1; i < f.length; i++) ctx3d.lineTo(corners[f[i]].sx, corners[f[i]].sy);
+      ctx3d.closePath(); ctx3d.fill(); ctx3d.stroke();
+    }
   }
-  const tc = project3d({ x:(x0+x1)/2, y:yTop, z:(z0+z1)/2 });
+  const tc = n && project3d({ x: cxSum / n, y: yTop, z: czSum / n });   // one label at the union centre
   if (tc) {
     ctx3d.fillStyle = hexA(c, 0.95); ctx3d.font = "bold 12px Segoe UI, sans-serif";
     ctx3d.textAlign = "center"; ctx3d.textBaseline = "bottom";
@@ -1135,14 +1168,22 @@ function renderInspector() {
   // Area selected → area editor takes precedence
   const ar = selectedAreaId && map.areas.find(a => a.id === selectedAreaId);
   if (ar) {
+    const bnd = areaBounds(ar);
+    const nCells = areaCells(ar).size;
     inspector.innerHTML = `<h3>Area</h3>
       <div class="insec">
         <div class="field"><label>Name</label><input type="text" id="a_name" value="${escapeAttr(ar.name)}"></div>
         <div class="field"><label>Colour</label><div class="swatches" id="a_color"></div></div>
-        <div class="hint">cells (${ar.x}, ${ar.y}) · ${ar.w}×${ar.h} · spans all layers</div>
+        <div class="hint">${ar.rects.length} rect${ar.rects.length !== 1 ? "s" : ""} · ${nCells} cells · spans all layers</div>
+      </div>
+      <div class="insec">
+        <button id="a_merge" style="width:100%;margin-bottom:6px;${areaMergeSource === ar.id ? "outline:2px solid var(--good);" : ""}">🔗 Merge with another area…</button>
+        ${ar.rects.length > 1 ? `<button id="a_split" style="width:100%;">✂ Split into rectangles</button>` : ""}
       </div>
       <div class="insec"><button class="danger" id="a_del" style="width:100%">Delete area</button></div>
-      <div class="empty-note hint">Drag the area to move it; drag the bottom-right handle to resize. Toggle <b>▭ Area</b> off to return to room editing.</div>`;
+      <div class="empty-note hint">${areaMergeSource === ar.id
+        ? `<b style="color:var(--good)">Click another area to merge it in</b> (Esc cancels).`
+        : `Drag the area to move it${ar.rects.length === 1 ? "; drag the bottom-right handle to resize" : ""}. Merge adjacent areas to make L-shapes.`}</div>`;
     const sw = document.getElementById("a_color");
     PALETTE.forEach(p => {
       const s = document.createElement("div");
@@ -1153,10 +1194,16 @@ function renderInspector() {
     });
     document.getElementById("a_name").oninput = e => {
       ar.name = e.target.value; save();
-      const lab = world.querySelector(`.area[data-aid="${ar.id}"] .area-label`);
+      const lab = world.querySelector(`.area-label[data-aid="${ar.id}"]`);
       if (lab) lab.textContent = ar.name;   // live-update without rebuilding the inspector
     };
     document.getElementById("a_name").onchange = () => commit();
+    document.getElementById("a_merge").onclick = () => {
+      areaMergeSource = (areaMergeSource === ar.id) ? null : ar.id;   // toggle the pick
+      render();
+    };
+    const splitBtn = document.getElementById("a_split");
+    if (splitBtn) splitBtn.onclick = () => { splitArea(ar.id); commit(); render(); };
     document.getElementById("a_del").onclick = () => { if (confirm(`Delete area "${ar.name}"?`)) { deleteArea(ar.id); commit(); render(); } };
     return;
   }
@@ -1454,15 +1501,22 @@ viewport.addEventListener("mousedown", e => {
   // Area mode: draw / move / resize zone rectangles (rooms are click-through here)
   if (areaMode) {
     const handle = e.target.closest(".area-resize");
-    const areaEl = e.target.closest(".area");
+    const w = screenToWorld(e.clientX, e.clientY);
+    const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
+    const hit = areaAtCell(cx, cy);
+    if (areaMergeSource) {
+      // merge pick: click a different area to absorb it; empty/self cancels
+      if (hit && hit.id !== areaMergeSource) { mergeAreas(areaMergeSource, hit.id); areaMergeSource = null; commit(); render(); }
+      else { areaMergeSource = null; render(); }
+      e.preventDefault(); return;
+    }
     if (handle) {
       const ar = map.areas.find(a => a.id === handle.dataset.aid);
       selectedAreaId = ar.id; render();
-      drag = { type:"area-resize", aid: ar.id, x0:e.clientX, y0:e.clientY, sw: ar.w, sh: ar.h };
-    } else if (areaEl) {
-      const ar = map.areas.find(a => a.id === areaEl.dataset.aid);
-      selectedAreaId = ar.id; clearSelection(); render();
-      drag = { type:"area-move", aid: ar.id, x0:e.clientX, y0:e.clientY, sx: ar.x, sy: ar.y };
+      drag = { type:"area-resize", aid: ar.id, x0:e.clientX, y0:e.clientY, sw: ar.rects[0].w, sh: ar.rects[0].h };
+    } else if (hit) {
+      selectedAreaId = hit.id; clearSelection(); render();
+      drag = { type:"area-move", aid: hit.id, x0:e.clientX, y0:e.clientY, rects0: hit.rects.map(rc => ({ ...rc })) };
     } else {
       drag = { type:"area-draw", x0:e.clientX, y0:e.clientY };
       const m = document.getElementById("marquee");
@@ -1554,13 +1608,20 @@ window.addEventListener("mousemove", e => {
     m.style.width = Math.abs(e.clientX - drag.x0) + "px";
     m.style.height = Math.abs(e.clientY - drag.y0) + "px";
   } else if (drag.type === "area-move") {
-    const ddx = Math.round(dx/scale/CELL), ddy = Math.round(dy/scale/CELL);
-    const el = world.querySelector(`.area[data-aid="${drag.aid}"]`);
-    if (el) { el.style.left = ((drag.sx + ddx) * CELL) + "px"; el.style.top = ((drag.sy + ddy) * CELL) + "px"; }
+    // translate the SVG group + label/handle live (avoids re-rendering the whole map per move)
+    const wdx = dx / scale, wdy = dy / scale;
+    const g = svg.querySelector(`.area-g[data-aid="${drag.aid}"]`);
+    if (g) g.setAttribute("transform", `translate(${wdx},${wdy})`);
+    world.querySelectorAll(`.area-label[data-aid="${drag.aid}"], .area-resize[data-aid="${drag.aid}"]`)
+      .forEach(el => el.style.transform = `translate(${wdx}px, ${wdy}px)`);
   } else if (drag.type === "area-resize") {
-    const ddx = Math.round(dx/scale/CELL), ddy = Math.round(dy/scale/CELL);
-    const el = world.querySelector(`.area[data-aid="${drag.aid}"]`);
-    if (el) { el.style.width = (Math.max(1, drag.sw + ddx) * CELL) + "px"; el.style.height = (Math.max(1, drag.sh + ddy) * CELL) + "px"; }
+    const ar = map.areas.find(a => a.id === drag.aid);
+    if (ar && ar.rects.length === 1) {
+      const ddx = Math.round(dx/scale/CELL), ddy = Math.round(dy/scale/CELL);
+      ar.rects[0].w = clamp(drag.sw + ddx, 1, GRID_N - ar.rects[0].x);
+      ar.rects[0].h = clamp(drag.sh + ddy, 1, GRID_N - ar.rects[0].y);
+      renderFlat();   // reshape preview (single rect; cheap enough)
+    }
   } else if (drag.type === "link") {
     const a = roomWorldCenter(map.rooms[drag.fromId]);
     const w1 = screenToWorld(e.clientX, e.clientY);
@@ -1606,7 +1667,7 @@ window.addEventListener("mouseup", e => {
     const x0 = clamp(Math.floor(a.x / CELL), 0, GRID_N-1), y0 = clamp(Math.floor(a.y / CELL), 0, GRID_N-1);
     const x1 = clamp(Math.floor(b.x / CELL), 0, GRID_N-1), y1 = clamp(Math.floor(b.y / CELL), 0, GRID_N-1);
     const ar = { id: uid(), name: "Area", color: "Teal",
-                 x: Math.min(x0,x1), y: Math.min(y0,y1), w: Math.abs(x1-x0)+1, h: Math.abs(y1-y0)+1 };
+                 rects: [{ x: Math.min(x0,x1), y: Math.min(y0,y1), w: Math.abs(x1-x0)+1, h: Math.abs(y1-y0)+1 }] };
     map.areas.push(ar); selectedAreaId = ar.id; clearSelection();
     commit(); render();
     return;
@@ -1614,19 +1675,19 @@ window.addEventListener("mouseup", e => {
   if (d.type === "area-move") {
     const ar = map.areas.find(a => a.id === d.aid);
     if (ar) {
-      const ddx = Math.round((e.clientX - d.x0)/scale/CELL), ddy = Math.round((e.clientY - d.y0)/scale/CELL);
-      ar.x = clamp(d.sx + ddx, 0, GRID_N - ar.w); ar.y = clamp(d.sy + ddy, 0, GRID_N - ar.h);
+      let ddx = Math.round((e.clientX - d.x0)/scale/CELL), ddy = Math.round((e.clientY - d.y0)/scale/CELL);
+      const minX = Math.min(...d.rects0.map(r => r.x)), minY = Math.min(...d.rects0.map(r => r.y));
+      const maxX = Math.max(...d.rects0.map(r => r.x + r.w)), maxY = Math.max(...d.rects0.map(r => r.y + r.h));
+      ddx = clamp(ddx, -minX, GRID_N - maxX); ddy = clamp(ddy, -minY, GRID_N - maxY);  // keep whole shape in grid
+      ar.rects = d.rects0.map(rc => ({ x: rc.x + ddx, y: rc.y + ddy, w: rc.w, h: rc.h }));
       if (ddx || ddy) commit();
     }
     render(); return;
   }
   if (d.type === "area-resize") {
+    // rects[0] already updated live during mousemove; just commit if it changed
     const ar = map.areas.find(a => a.id === d.aid);
-    if (ar) {
-      const ddx = Math.round((e.clientX - d.x0)/scale/CELL), ddy = Math.round((e.clientY - d.y0)/scale/CELL);
-      ar.w = clamp(d.sw + ddx, 1, GRID_N - ar.x); ar.h = clamp(d.sh + ddy, 1, GRID_N - ar.y);
-      if (ddx || ddy) commit();
-    }
+    if (ar && ar.rects.length === 1 && (ar.rects[0].w !== d.sw || ar.rects[0].h !== d.sh)) commit();
     render(); return;
   }
   if (d.type === "move") {
@@ -1786,6 +1847,7 @@ window.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (pendingLink) setPending(null);
     if (pathMode) clearPath();
+    if (areaMergeSource) { areaMergeSource = null; render(); return; }   // cancel a merge pick first
     selectedAreaId = null;
     clearSelection(); closeDirPicker(); render(); return;
   }
@@ -1835,6 +1897,7 @@ function setMode(mode) {
   if (!linkMode) setPending(null);
   if (!pathMode) pathStart = null;
   if (!areaMode && selectedAreaId) { selectedAreaId = null; }
+  if (!areaMode) areaMergeSource = null;
   document.getElementById("linkBtn").classList.toggle("active", linkMode);
   document.getElementById("pathBtn").classList.toggle("active", pathMode);
   document.getElementById("areaBtn").classList.toggle("active", areaMode);
@@ -1867,8 +1930,43 @@ function colorCounts() {
   for (const r of Object.values(map.rooms)) c[r.color] = (c[r.color] || 0) + 1;
   return c;
 }
-function roomInArea(r, ar) { return r.x >= ar.x && r.x < ar.x + ar.w && r.y >= ar.y && r.y < ar.y + ar.h; }
+function cellInRect(cx, cy, rc) { return cx >= rc.x && cx < rc.x + rc.w && cy >= rc.y && cy < rc.y + rc.h; }
+function roomInArea(r, ar) { return ar.rects.some(rc => cellInRect(r.x, r.y, rc)); }
 function roomsInArea(ar) { return Object.values(map.rooms).filter(r => roomInArea(r, ar)).length; }
+function areaCells(ar) {
+  const s = new Set();
+  for (const rc of ar.rects) for (let x = rc.x; x < rc.x + rc.w; x++) for (let y = rc.y; y < rc.y + rc.h; y++) s.add(x + ":" + y);
+  return s;
+}
+function areaBounds(ar) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const rc of ar.rects) { minX = Math.min(minX, rc.x); minY = Math.min(minY, rc.y); maxX = Math.max(maxX, rc.x + rc.w); maxY = Math.max(maxY, rc.y + rc.h); }
+  return { minX, minY, maxX, maxY };
+}
+function areaLabelAnchor(ar) {
+  // occupied cell with smallest y then x, so the label sits on the shape (not an empty L-corner)
+  let best = null;
+  for (const rc of ar.rects) {
+    const c = { x: rc.x, y: rc.y };
+    if (!best || c.y < best.y || (c.y === best.y && c.x < best.x)) best = c;
+  }
+  return best || { x: 0, y: 0 };
+}
+function areaAtCell(cx, cy) { return map.areas.find(a => a.rects.some(rc => cellInRect(cx, cy, rc))) || null; }
+function mergeAreas(intoId, otherId) {
+  const into = map.areas.find(a => a.id === intoId), other = map.areas.find(a => a.id === otherId);
+  if (!into || !other || into === other) return;
+  into.rects = into.rects.concat(other.rects.map(rc => ({ ...rc })));
+  map.areas = map.areas.filter(a => a.id !== otherId);
+  selectedAreaId = intoId;
+}
+function splitArea(id) {
+  const a = map.areas.find(x => x.id === id);
+  if (!a || a.rects.length < 2) return;
+  map.areas = map.areas.filter(x => x.id !== id);
+  a.rects.forEach((rc, i) => map.areas.push({ id: uid(), name: a.name + (i ? " " + (i + 1) : ""), color: a.color, rects: [{ ...rc }] }));
+  selectedAreaId = null;
+}
 function connectionCount() {
   const seen = new Set();
   for (const r of Object.values(map.rooms))
@@ -2035,7 +2133,7 @@ function doExport() {
     outRooms[r.id] = copy;
   }
   // areas that contain at least one exported room
-  const outAreas = map.areas.filter(a => rooms.some(r => roomInArea(r, a))).map(a => ({ ...a }));
+  const outAreas = map.areas.filter(a => rooms.some(r => roomInArea(r, a))).map(a => ({ ...a, rects: a.rects.map(rc => ({ ...rc })) }));
   const zs = rooms.map(r => r.z);
   const title = document.getElementById("expTitle").value.trim();
   const author = document.getElementById("expAuthor").value.trim();
@@ -2125,7 +2223,9 @@ function mergeImport(data) {
     map.rooms[nid] = nr; newIds.push(nid);
   }
   for (const a of (data.areas || [])) {
-    map.areas.push({ id: uid(), name: a.name, color: a.color, x: clampX(a.x + dx), y: clampY(a.y + dy), w: a.w, h: a.h });
+    const rects = (Array.isArray(a.rects) && a.rects.length) ? a.rects : [{ x: a.x, y: a.y, w: a.w, h: a.h }];  // accept new or legacy
+    map.areas.push({ id: uid(), name: a.name, color: a.color,
+      rects: rects.map(rc => ({ x: clampX(rc.x + dx), y: clampY(rc.y + dy), w: rc.w, h: rc.h })) });
   }
   selection = new Set(newIds);
   selectedId = newIds[0];
