@@ -57,5 +57,11 @@ export function buildStats() {
     h += `<div class="stathdr">Rooms per area</div>`;
     for (const ar of S.map.areas) h += `<div class="statrow"><span><span class="dot" style="background:${areaHex(ar)}"></span>${escapeHtml(ar.name)}</span><span class="val">${roomsInArea(ar)}</span></div>`;
   }
+  if (S.map.transitLines.length) {
+    const totalStops = S.map.transitLines.reduce((n, l) => n + l.stations.length, 0);
+    h += `<div class="stathdr">Transit</div>`;
+    h += `<div class="statline">${plur(S.map.transitLines.length, "line")} · ${plur(totalStops, "stop")}</div>`;
+    for (const l of S.map.transitLines) h += `<div class="statrow"><span><span class="dot" style="background:${areaHex(l)}"></span>${escapeHtml(l.name)}</span><span class="val">${l.stations.length}</span></div>`;
+  }
   el.innerHTML = h;
 }

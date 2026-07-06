@@ -54,6 +54,7 @@
     <button id="linkBtn" title="Link mode: click a room, change layers if needed, then click the target. (Shift-drag links rooms on the same layer.)">🔗 Link</button>
     <button id="pathBtn" title="Pathfinder: click the start room, then the destination. Shows the shortest route as directions.">🧭 Path</button>
     <button id="areaBtn" title="Area mode: drag empty space to draw a zone rectangle. Spans all layers. Click an area to move/resize/edit it.">▭ Area</button>
+    <button id="transitBtn" title="Transit mode: pick or create a line in the panel, then click rooms to add/remove them as stations.">🚆 Transit</button>
     <button id="legendBtn" title="Color-tag legend: name what each colour means.">🏷 Legend</button>
     <button id="onionBtn" title="Onion-skin: show neighbour layers ghosted through.">👁 Onion</button>
     <button id="statsBtn" title="Map statistics: room counts by layer, colour and area.">📊 Stats</button>
@@ -137,6 +138,18 @@
   <div id="importSummary"></div>
   <button id="importAdd" class="primary" style="width:100%;margin-bottom:6px;">➕ Add to current map</button>
   <button id="importReplace" class="danger" style="width:100%;">⚠ Replace everything</button>
+</div>
+
+<div id="transitPanel" class="popover">
+  <div class="pop-hdr">Transit lines <button class="popclose" data-close="transitPanel">✕</button></div>
+  <div id="transitBody"></div>
+  <button id="transitNewBtn" class="primary" style="width:100%;margin-top:6px;">+ New line</button>
+  <div class="empty-note hint" style="padding:8px 0 0;">Click "Edit" on a line, then click rooms on the map to add/remove them as stations.</div>
+</div>
+
+<div id="ridePicker">
+  <div class="hdr" id="rideHdr">Ride to…</div>
+  <div id="rideList"></div>
 </div>
 
 <div id="marquee"></div>

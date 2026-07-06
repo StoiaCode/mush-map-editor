@@ -5,7 +5,7 @@ import { layersPresent } from "./model.js";
 import { render } from "./app.js";
 
 // ---------- Persistence ----------
-export function defaultMap() { return { version: 2, rooms: {}, areas: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
+export function defaultMap() { return { version: 2, rooms: {}, areas: [], transitLines: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
 
 export function save() {
   if (S.saveTimer) clearTimeout(S.saveTimer);
@@ -50,6 +50,11 @@ export function normalize() {
       a.rects = [{ x: a.x || 0, y: a.y || 0, w: a.w || 1, h: a.h || 1 }];  // migrate legacy single-rect areas
     }
     delete a.x; delete a.y; delete a.w; delete a.h;
+  }
+  if (!Array.isArray(map.transitLines)) map.transitLines = [];
+  for (const line of map.transitLines) {
+    if (!Array.isArray(line.stations)) line.stations = [];
+    line.stations = line.stations.filter(id => map.rooms[id]);   // drop stations whose room no longer exists
   }
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);

@@ -42,6 +42,7 @@ export function deleteRoom(id) {
   for (const r of Object.values(S.map.rooms))
     for (const d of Object.keys(r.exits))
       if (r.exits[d] === id) delete r.exits[d];
+  for (const line of S.map.transitLines) line.stations = line.stations.filter(sid => sid !== id);
   S.selection.delete(id);
   if (S.selectedId === id) S.selectedId = S.selection.size ? [...S.selection][0] : null;
   if (!roomsOnLayer(S.map.currentLayer).length) {
@@ -163,4 +164,44 @@ export function splitArea(id) {
   S.map.areas = S.map.areas.filter(x => x.id !== id);
   a.rects.forEach((rc, i) => S.map.areas.push({ id: uid(), name: a.name + (i ? " " + (i + 1) : ""), color: a.color, rects: [{ ...rc }] }));
   S.selectedAreaId = null;
+}
+
+// ---------- Transit lines ----------
+// A room is a "station" purely by appearing in some line's `stations` array — nothing
+// is stored on the room itself, so a station can belong to any number of lines.
+// Stations are stored in physical route order (for stop-numbering display); lines are
+// back-and-forth (not terminating), so every station on a line reaches every other —
+// pathfinding treats this as all-pairs reachable, never as "adjacent stops only".
+export function stationLinesFor(roomId) {
+  return S.map.transitLines.filter(line => line.stations.includes(roomId));
+}
+export function createTransitLine(name, color) {
+  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [] };
+  S.map.transitLines.push(line);
+  return line;
+}
+export function deleteTransitLine(id) {
+  S.map.transitLines = S.map.transitLines.filter(l => l.id !== id);
+  if (S.transitActiveLine === id) S.transitActiveLine = null;
+}
+// Add the room to the line if absent, or remove it (closing the gap) if already present.
+export function toggleStation(lineId, roomId) {
+  const line = S.map.transitLines.find(l => l.id === lineId);
+  if (!line) return;
+  const i = line.stations.indexOf(roomId);
+  if (i === -1) line.stations.push(roomId);
+  else line.stations.splice(i, 1);
+}
+// Swap a station with its neighbour (delta = -1 or +1) to reorder the route.
+export function moveStation(lineId, roomId, delta) {
+  const line = S.map.transitLines.find(l => l.id === lineId);
+  if (!line) return;
+  const i = line.stations.indexOf(roomId);
+  const j = i + delta;
+  if (i === -1 || j < 0 || j >= line.stations.length) return;
+  [line.stations[i], line.stations[j]] = [line.stations[j], line.stations[i]];
+}
+// True if some line contains both rooms — the pathfinder's "one board-and-ride step" test.
+export function lineConnects(roomAId, roomBId) {
+  return S.map.transitLines.some(l => l.stations.includes(roomAId) && l.stations.includes(roomBId));
 }

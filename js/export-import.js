@@ -65,13 +65,17 @@ export function doExport() {
   }
   // areas that contain at least one exported room
   const outAreas = S.map.areas.filter(a => rooms.some(r => roomInArea(r, a))).map(a => ({ ...a, rects: a.rects.map(rc => ({ ...rc })) }));
+  // transit lines: keep only stations that made the cut; a line needs 2+ remaining stops to be usable
+  const outLines = S.map.transitLines
+    .map(l => ({ ...l, stations: l.stations.filter(id => included.has(id)) }))
+    .filter(l => l.stations.length >= 2);
   const zs = rooms.map(r => r.z);
   const title = document.getElementById("expTitle").value.trim();
   const author = document.getElementById("expAuthor").value.trim();
   const out = {
     version: 2, partial: true,
     meta: { title, author, date: new Date().toISOString().slice(0, 10), rooms: rooms.length },
-    rooms: outRooms, areas: outAreas, tagLabels: S.map.tagLabels,
+    rooms: outRooms, areas: outAreas, transitLines: outLines, tagLabels: S.map.tagLabels,
     currentLayer: Math.min(...zs)
   };
   const slug = (title || "mush-map-partial").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -156,6 +160,10 @@ export function mergeImport(data) {
     const rects = (Array.isArray(a.rects) && a.rects.length) ? a.rects : [{ x: a.x, y: a.y, w: a.w, h: a.h }];  // accept new or legacy
     S.map.areas.push({ id: uid(), name: a.name, color: a.color,
       rects: rects.map(rc => ({ x: clampX(rc.x + dx), y: clampY(rc.y + dy), w: rc.w, h: rc.h })) });
+  }
+  for (const line of (data.transitLines || [])) {
+    const stations = (line.stations || []).map(sid => idMap[sid]).filter(Boolean);  // drop any that didn't survive
+    if (stations.length) S.map.transitLines.push({ id: uid(), name: line.name, color: line.color, stations });
   }
   S.selection = new Set(newIds);
   S.selectedId = newIds[0];

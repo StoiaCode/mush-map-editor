@@ -16,6 +16,8 @@ export const S = {
   areaMode: false,          // drawing/editing zone rectangles
   selectedAreaId: null,     // currently selected area (separate from room selection)
   areaMergeSource: null,    // area id awaiting a merge target (click another area)
+  transitMode: false,       // adding/removing stations on the active transit line
+  transitActiveLine: null,  // line id that room clicks toggle stations on, while in transit mode
   pathRooms: new Set(),     // rooms on the current shortest-path result (highlighted)
   pathCanFly: true,         // pathfinder may use flight-only exits
   pathLast: null,           // {startId, endId} of the last computed route, for recompute on toggle

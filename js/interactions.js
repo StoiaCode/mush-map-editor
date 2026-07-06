@@ -1,9 +1,9 @@
 import { CELL, GRID_N, KEYCARVE } from "./constants.js";
 import { S, viewport, world, svg, dirpicker, dirGrid } from "./state.js";
-import { clamp, escapeHtml, uid } from "./utils.js";
+import { clamp, escapeHtml, uid, areaHex } from "./utils.js";
 import {
   roomAtCell, createRoom, areaAtCell, mergeAreas, selectSingle, toggleSel,
-  clearSelection, deleteRoom, carve, addExit, deleteArea
+  clearSelection, deleteRoom, carve, addExit, deleteArea, stationLinesFor, toggleStation
 } from "./model.js";
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
@@ -89,6 +89,11 @@ viewport.addEventListener("mousedown", e => {
       if (!S.pathStart) { selectSingle(id); S.pathStart = id; S.pathRooms = new Set(); setPathHint(); render(); }
       else if (S.pathStart !== id) { computePath(S.pathStart, id); S.pathStart = null; }
       else { S.pathStart = null; setPathHint(); render(); }
+      e.preventDefault(); return;
+    }
+    // Transit mode = click a room to toggle it as a station on the active line
+    if (S.transitMode) {
+      if (S.transitActiveLine) { toggleStation(S.transitActiveLine, id); commit(); render(); }
       e.preventDefault(); return;
     }
     // Plain click: if part of a multi-selection, drag the whole group; else single-select.
@@ -260,8 +265,12 @@ viewport.addEventListener("click", e => {
   const badge = e.target.closest(".vbadge");
   if (badge) {
     const r = S.map.rooms[badge.closest(".room").dataset.id];
-    const dir = badge.dataset.vbadge === "up" ? "UP" : "DOWN";
-    if (r.exits[dir]) gotoRoom(r.exits[dir]);
+    if (badge.dataset.vbadge === "train") {
+      openRidePicker(r.id, e.clientX, e.clientY);
+    } else {
+      const dir = badge.dataset.vbadge === "up" ? "UP" : "DOWN";
+      if (r.exits[dir]) gotoRoom(r.exits[dir]);
+    }
     e.stopPropagation();
   }
 });
@@ -326,6 +335,41 @@ dirGrid.addEventListener("click", e => {
 });
 document.addEventListener("mousedown", e => {
   if (dirpicker.style.display === "block" && !dirpicker.contains(e.target)) closeDirPicker();
+});
+
+// ---------- Ride-to picker (train badge click) ----------
+function openRidePicker(roomId, sx, sy) {
+  const lines = stationLinesFor(roomId);
+  if (!lines.length) return;
+  const picker = document.getElementById("ridePicker");
+  const list = document.getElementById("rideList");
+  list.innerHTML = "";
+  document.getElementById("rideHdr").textContent = "Ride from " + S.map.rooms[roomId].name;
+  const here = S.map.rooms[roomId];
+  for (const line of lines) {
+    const others = line.stations.filter(id => id !== roomId && S.map.rooms[id]);
+    if (!others.length) continue;
+    const hdr = document.createElement("div");
+    hdr.className = "ride-linehdr"; hdr.textContent = line.name; hdr.style.color = areaHex(line);
+    list.appendChild(hdr);
+    for (const oid of others) {
+      const r = S.map.rooms[oid];
+      const btn = document.createElement("button");
+      btn.className = "ride-stop";
+      btn.textContent = r.name + (r.z !== here.z ? ` (L${r.z})` : "");
+      btn.onclick = () => { closeRidePicker(); gotoRoom(oid); };
+      list.appendChild(btn);
+    }
+  }
+  picker.style.display = "block";
+  const w = picker.offsetWidth, h = picker.offsetHeight;
+  picker.style.left = clamp(sx, 0, window.innerWidth - w - 8) + "px";
+  picker.style.top = clamp(sy, 0, window.innerHeight - h - 8) + "px";
+}
+function closeRidePicker() { document.getElementById("ridePicker").style.display = "none"; }
+document.addEventListener("mousedown", e => {
+  const picker = document.getElementById("ridePicker");
+  if (picker.style.display === "block" && !picker.contains(e.target)) closeRidePicker();
 });
 
 // ---------- Wheel zoom ----------

@@ -94,6 +94,7 @@ select { cursor: pointer; }
 .vbadge.up { top: -9px; right: -9px; }
 .vbadge.down { bottom: -9px; right: -9px; }
 .vbadge.fly { border-color: #3cc4b8; color: #3cc4b8; }
+.vbadge.train { bottom: -9px; left: -9px; font-size: 9px; }
 
 .exitlabel {
   font-size: 10px; fill: var(--muted); font-weight: 700;
@@ -199,6 +200,7 @@ select { cursor: pointer; }
 #viewport.areamode { cursor: crosshair; }
 #viewport.areamode .room { pointer-events: none; }
 #viewport.areamode .area-resize { display: block; }
+#viewport.transitmode { cursor: crosshair; }
 
 /* Direction picker popup */
 #dirpicker {
@@ -208,6 +210,31 @@ select { cursor: pointer; }
 #dirpicker .hdr { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 #dirpicker .grid3 { display: grid; grid-template-columns: repeat(3,46px); gap: 5px; }
 #dirpicker button { padding: 8px 0; }
+
+/* Ride-to picker (train badge click) */
+#ridePicker {
+  position: fixed; z-index: 100; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.6); display: none;
+  min-width: 180px; max-width: 260px;
+}
+#ridePicker .hdr { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.ride-linehdr { font-size: 11px; font-weight: 700; margin: 6px 0 3px; }
+.ride-stop { display: block; width: 100%; text-align: left; margin-bottom: 3px; }
+
+/* Transit line panel */
+#transitPanel { max-width: 300px; max-height: 80vh; overflow-y: auto; }
+.transline { border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.transline.active { border-color: var(--good); }
+.transline-hdr { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.transline-hdr .sw { width: 16px; height: 16px; border-radius: 4px; flex: none; }
+.transline-hdr .tl-name { flex: 1; min-width: 0; }
+.transline-hdr .cnt { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.transline-hdr .tl-active, .transline-hdr .tl-del { padding: 3px 7px; font-size: 11px; }
+.tl-stations { margin-top: 4px; }
+.tl-station { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; }
+.tl-station .tl-stopnum { color: var(--muted); min-width: 16px; text-align: right; }
+.tl-station .tl-stopname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-station button { padding: 1px 6px; font-size: 10px; }
 
 #searchBox { width: 150px; }
 #pathResult {
@@ -225,6 +252,8 @@ select { cursor: pointer; }
 .pathsep { color: var(--muted); margin: 0 2px; }
 .flystep { color: #3cc4b8; }
 .flystep::after { content: "\2708"; font-size: .8em; margin-left: 2px; opacity: .9; }
+#pathResult .trainstep { margin: 6px 0; padding: 4px 8px; background: rgba(91,157,255,.12);
+  border: 1px solid rgba(91,157,255,.35); border-radius: 6px; color: var(--text); font-size: 12px; }
 #pathResult .flychk { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin: 4px 0; cursor: pointer; }
 #pathResult button { margin-top: 4px; }
 .hint { color: var(--muted); font-size: 11px; }

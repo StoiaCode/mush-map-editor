@@ -1,8 +1,8 @@
-import { GRID_N } from "./constants.js";
+import { GRID_N, PALETTE } from "./constants.js";
 import { S, viewport } from "./state.js";
-import { clamp } from "./utils.js";
-import { savePrefs, undo, redo } from "./persistence.js";
-import { roomsOnLayer } from "./model.js";
+import { clamp, escapeHtml, escapeAttr, areaHex } from "./utils.js";
+import { savePrefs, undo, redo, commit } from "./persistence.js";
+import { roomsOnLayer, createTransitLine, deleteTransitLine, toggleStation, moveStation } from "./model.js";
 import { render } from "./app.js";
 import { stepLayer, zoomAt, centerOnRoom, centerCellView } from "./render-flat.js";
 import { render3d } from "./render-3d.js";
@@ -23,21 +23,34 @@ export function setMode(mode) {
   S.linkMode = (mode === "link");
   S.pathMode = (mode === "path");
   S.areaMode = (mode === "area");
+  S.transitMode = (mode === "transit");
   if (!S.linkMode) { S.pendingLink = null; const hint = document.getElementById("linkHint"); if (hint) hint.style.display = "none"; }
   if (!S.pathMode) S.pathStart = null;
   if (!S.areaMode && S.selectedAreaId) { S.selectedAreaId = null; }
   if (!S.areaMode) S.areaMergeSource = null;
+  if (!S.transitMode) {
+    S.transitActiveLine = null;
+    const tp = document.getElementById("transitPanel"); if (tp) tp.style.display = "none";
+  }
   document.getElementById("linkBtn").classList.toggle("active", S.linkMode);
   document.getElementById("pathBtn").classList.toggle("active", S.pathMode);
   document.getElementById("areaBtn").classList.toggle("active", S.areaMode);
+  document.getElementById("transitBtn").classList.toggle("active", S.transitMode);
   viewport.classList.toggle("linkmode", S.linkMode || S.pathMode);
   viewport.classList.toggle("areamode", S.areaMode);
+  viewport.classList.toggle("transitmode", S.transitMode);
   if (S.pathMode) setPathHint();
   render();
 }
 document.getElementById("linkBtn").onclick = () => setMode(S.linkMode ? "none" : "link");
 document.getElementById("pathBtn").onclick = () => setMode(S.pathMode ? "none" : "path");
 document.getElementById("areaBtn").onclick = () => setMode(S.areaMode ? "none" : "area");
+document.getElementById("transitBtn").onclick = () => {
+  if (S.transitMode) { setMode("none"); return; }
+  setMode("transit");
+  buildTransitPanel();
+  positionPopover(document.getElementById("transitPanel"), document.getElementById("transitBtn"));
+};
 document.getElementById("searchBox").addEventListener("input", e => runSearch(e.target.value));
 document.getElementById("searchBox").addEventListener("keydown", e => {
   if (e.key === "Enter") { e.preventDefault(); jumpNextMatch(); }
@@ -82,6 +95,77 @@ document.getElementById("statsBtn").onclick = () => {
 document.querySelectorAll(".popclose").forEach(b => {
   b.onclick = () => { document.getElementById(b.dataset.close).style.display = "none"; };
 });
+// The transit panel is tied to transit mode (it's the only way to pick/create a line to
+// edit), so its close button exits the mode too, overriding the generic handler above.
+const transitCloseBtn = document.querySelector('#transitPanel .popclose');
+if (transitCloseBtn) transitCloseBtn.onclick = () => setMode("none");
+
+// ---------- Transit line panel ----------
+export function buildTransitPanel() {
+  const body = document.getElementById("transitBody");
+  body.innerHTML = "";
+  for (const line of S.map.transitLines) {
+    const row = document.createElement("div");
+    row.className = "transline" + (S.transitActiveLine === line.id ? " active" : "");
+    const head = document.createElement("div");
+    head.className = "transline-hdr";
+    head.innerHTML = `<span class="sw" style="background:${areaHex(line)}"></span>
+      <input type="text" class="tl-name" value="${escapeAttr(line.name)}">
+      <span class="cnt">${line.stations.length} stop${line.stations.length !== 1 ? "s" : ""}</span>`;
+    const editBtn = document.createElement("button");
+    editBtn.className = "tl-active"; editBtn.textContent = (S.transitActiveLine === line.id) ? "● editing" : "Edit";
+    const delBtn = document.createElement("button");
+    delBtn.className = "danger tl-del"; delBtn.textContent = "✕";
+    head.appendChild(editBtn); head.appendChild(delBtn);
+    row.appendChild(head);
+
+    const swatches = document.createElement("div");
+    swatches.className = "swatches";
+    PALETTE.forEach(p => {
+      const s = document.createElement("div");
+      s.className = "swatch" + (p.name === line.color ? " sel" : "");
+      s.style.background = p.c;
+      s.onclick = () => { line.color = p.name; commit(); buildTransitPanel(); render(); };
+      swatches.appendChild(s);
+    });
+    row.appendChild(swatches);
+
+    const stationsList = document.createElement("div");
+    stationsList.className = "tl-stations";
+    line.stations.forEach((sid, i) => {
+      const r = S.map.rooms[sid];
+      const srow = document.createElement("div");
+      srow.className = "tl-station";
+      srow.innerHTML = `<span class="tl-stopnum">${i + 1}</span><span class="tl-stopname">${escapeHtml(r ? r.name : "??")}</span>`;
+      const up = document.createElement("button"); up.textContent = "▲"; up.disabled = i === 0;
+      up.onclick = () => { moveStation(line.id, sid, -1); commit(); buildTransitPanel(); render(); };
+      const down = document.createElement("button"); down.textContent = "▼"; down.disabled = i === line.stations.length - 1;
+      down.onclick = () => { moveStation(line.id, sid, 1); commit(); buildTransitPanel(); render(); };
+      const rm = document.createElement("button"); rm.textContent = "✕";
+      rm.onclick = () => { toggleStation(line.id, sid); commit(); buildTransitPanel(); render(); };
+      srow.appendChild(up); srow.appendChild(down); srow.appendChild(rm);
+      stationsList.appendChild(srow);
+    });
+    if (!line.stations.length) stationsList.innerHTML = `<div class="hint">No stations yet — click "Edit" then click rooms on the map to add them.</div>`;
+    row.appendChild(stationsList);
+    body.appendChild(row);
+
+    head.querySelector(".tl-name").onchange = e => { line.name = e.target.value.trim() || line.name; commit(); render(); };
+    editBtn.onclick = () => {
+      S.transitActiveLine = (S.transitActiveLine === line.id) ? null : line.id;
+      buildTransitPanel();
+    };
+    delBtn.onclick = () => {
+      if (confirm(`Delete line "${line.name}"?`)) { deleteTransitLine(line.id); commit(); buildTransitPanel(); render(); }
+    };
+  }
+}
+document.getElementById("transitNewBtn").onclick = () => {
+  const line = createTransitLine("New Line", "Teal");
+  S.transitActiveLine = line.id;
+  commit(); buildTransitPanel(); render();
+};
+
 // close popovers when clicking elsewhere
 const POPS = { legendPanel: "legendBtn", onionPanel: "onionBtn", statsPanel: "statsBtn",
                exportPanel: "exportBtn", importPanel: "importBtn" };

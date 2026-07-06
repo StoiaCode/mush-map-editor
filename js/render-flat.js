@@ -1,7 +1,7 @@
 import { CELL, GRID_N, WORLD, SIZE_PX, COMPASS, VEC, OPP } from "./constants.js";
 import { S, viewport, world, svg, gridCanvas, ctx, layerLabel, zoomLabel } from "./state.js";
 import { colorOf, areaHex, hexA, escapeHtml, clamp } from "./utils.js";
-import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor } from "./model.js";
+import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor } from "./model.js";
 import { save } from "./persistence.js";
 import { render } from "./app.js";
 
@@ -105,6 +105,9 @@ export function renderFlat() {
   // areas: fill + outline on the SVG (behind connectors), shown on every layer; label + handle as DOM
   for (const ar of S.map.areas) drawAreaFlat(ar);
 
+  // transit lines: dashed connector between consecutive stations, in the line's colour
+  drawTransitLinesFlat(z);
+
   // --- onion-skin: neighbour layers ghosted behind everything, non-interactive ---
   if (S.onion.below) for (const r of roomsOnLayer(z - 1)) world.appendChild(makeRoomEl(r, "below"));
   if (S.onion.above) for (const r of roomsOnLayer(z + 1)) world.appendChild(makeRoomEl(r, "above"));
@@ -194,6 +197,51 @@ export function drawAreaFlat(ar) {
     world.appendChild(rz);
   }
 }
+// Dashed connector between consecutive stations on each line, in the line's colour.
+// Same-layer pairs get a direct line; a pair with one endpoint off-layer gets a stub
+// (mirrors the off-layer exit stub) pointed toward the real direction of the other stop.
+function drawTransitLinesFlat(z) {
+  for (const line of S.map.transitLines) {
+    const c = areaHex(line);
+    for (let i = 0; i < line.stations.length - 1; i++) {
+      const a = S.map.rooms[line.stations[i]], b = S.map.rooms[line.stations[i + 1]];
+      if (!a || !b) continue;
+      const onA = a.z === z, onB = b.z === z;
+      if (onA && onB) {
+        const ca = roomWorldCenter(a), cb = roomWorldCenter(b);
+        drawTransitConnector(ca.x, ca.y, cb.x, cb.y, c);
+      } else if (onA || onB) {
+        const near = onA ? a : b, far = onA ? b : a;
+        const cn = roomWorldCenter(near), cf = roomWorldCenter(far);
+        const dx = cf.x - cn.x, dy = cf.y - cn.y;
+        const len = Math.hypot(dx, dy) || 1, stubLen = CELL * 0.7;
+        drawTransitStub(cn.x, cn.y, cn.x + dx/len*stubLen, cn.y + dy/len*stubLen, "🚆 " + line.name + " →L" + far.z, c);
+      }
+    }
+  }
+}
+function drawTransitConnector(x1, y1, x2, y2, color) {
+  const ns = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+  line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+  line.setAttribute("stroke", color); line.setAttribute("stroke-width", "2.5");
+  line.setAttribute("stroke-dasharray", "8,5");
+  svg.appendChild(line);
+}
+function drawTransitStub(x1, y1, x2, y2, label, color) {
+  const ns = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+  line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+  line.setAttribute("stroke", color); line.setAttribute("stroke-width", "2.5");
+  line.setAttribute("stroke-dasharray", "3,4");
+  svg.appendChild(line);
+  const txt = document.createElementNS(ns, "text");
+  txt.setAttribute("x", x2); txt.setAttribute("y", y2 - 4);
+  txt.setAttribute("text-anchor", "middle"); txt.setAttribute("class", "exitlabel");
+  txt.textContent = label; svg.appendChild(txt);
+}
 // ghost: false (solid), or "below" / "above" for onion-skin neighbour layers.
 export function makeRoomEl(r, ghost) {
   const sel = !ghost && (r.id === S.selectedId || S.selection.has(r.id));
@@ -225,6 +273,8 @@ export function makeRoomEl(r, ghost) {
   if (!ghost) {
     if (r.exits.UP)   el.appendChild(vbadge("up", "↑", r.exitFly && r.exitFly.UP));
     if (r.exits.DOWN) el.appendChild(vbadge("down", "↓", r.exitFly && r.exitFly.DOWN));
+    const lines = stationLinesFor(r.id);
+    if (lines.length) el.appendChild(trainBadge(lines));
   }
   return el;
 }
@@ -233,6 +283,15 @@ export function vbadge(kind, ch, fly) {
   b.className = "vbadge " + kind + (fly ? " fly" : "");
   b.textContent = ch; b.dataset.vbadge = kind;
   if (fly) b.title = "flight-only";
+  return b;
+}
+export function trainBadge(lines) {
+  const b = document.createElement("div");
+  b.className = "vbadge train";
+  b.textContent = "🚆"; b.dataset.vbadge = "train";
+  const c = areaHex(lines[0]);
+  b.style.borderColor = c; b.style.color = c;
+  b.title = lines.map(l => l.name).join(", ");
   return b;
 }
 export function drawConnector(x1, y1, x2, y2, fly) {

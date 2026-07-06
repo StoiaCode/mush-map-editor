@@ -101,6 +101,19 @@ export function render3d() {
   }
   ctx3d.setLineDash([]);
 
+  // transit lines: dashed connector between consecutive stations, regardless of layer
+  // (cross-layer exits already do this; stations reuse the same "just draw it" approach)
+  for (const line of S.map.transitLines) {
+    const color = areaHex(line);
+    ctx3d.strokeStyle = color; ctx3d.lineWidth = 2; ctx3d.setLineDash([7, 5]);
+    for (let i = 0; i < line.stations.length - 1; i++) {
+      const pa = pr[line.stations[i]], pb = pr[line.stations[i + 1]];
+      if (!pa || !pb) continue;
+      ctx3d.beginPath(); ctx3d.moveTo(pa.sx, pa.sy); ctx3d.lineTo(pb.sx, pb.sy); ctx3d.stroke();
+    }
+  }
+  ctx3d.setLineDash([]);
+
   // rooms, sorted far → near
   const order = rooms.filter(r => pr[r.id]).sort((r1, r2) => pr[r2.id].depth - pr[r1.id].depth);
   S.proj3dCache = [];

@@ -1,9 +1,9 @@
 import { PALETTE, DIRS } from "./constants.js";
 import { S, world, inspector } from "./state.js";
-import { escapeHtml, escapeAttr } from "./utils.js";
+import { escapeHtml, escapeAttr, areaHex } from "./utils.js";
 import {
   areaCells, deleteArea, splitArea,
-  carve, changeRoomLayer, setExitFly, deleteRoom, clearSelection, selectSingle
+  carve, changeRoomLayer, setExitFly, deleteRoom, clearSelection, selectSingle, stationLinesFor
 } from "./model.js";
 import { commit, save } from "./persistence.js";
 import { render } from "./app.js";
@@ -155,6 +155,15 @@ export function renderInspector() {
       <button data-delexit="${d}">✕</button></div>`;
   }
   h += `</div>`;
+  const lines = stationLinesFor(r.id);
+  if (lines.length) {
+    h += `<div class="insec"><span class="seclabel">Stations</span>`;
+    for (const line of lines) {
+      const stop = line.stations.indexOf(r.id) + 1;
+      h += `<div class="hint">🚆 <span style="color:${areaHex(line)}">${escapeHtml(line.name)}</span> — stop ${stop} of ${line.stations.length}</div>`;
+    }
+    h += `<div class="hint" style="margin-top:4px;">Edit via the 🚆 Transit panel.</div></div>`;
+  }
   h += `<div class="insec"><button class="danger" id="delRoom" style="width:100%">Delete room</button></div>`;
   inspector.innerHTML = h;
 
