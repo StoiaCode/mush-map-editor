@@ -1,12 +1,15 @@
 # MUSH Map Editor
 
-A single-file web app for hand-documenting the layout of tile-based MUSHes that
-have multiple vertical levels. Everything runs from one HTML file and saves to your browser.
+A web app for hand-documenting the layout of tile-based MUSHes that have
+multiple vertical levels. No build step, no backend, no accounts — it saves to
+your browser.
 
 ## Usage
 
-Open `mush-map-editor.html` in any modern browser. Your map auto-saves locally,
-and you can export or import it as JSON for backups.
+Serve the folder with any static web server and open `mush-map-editor.html`
+(it loads its JS as ES modules, so it needs `http://` or `https://`, not a bare
+`file://` double-click). Your map auto-saves locally, and you can export or
+import it as JSON for backups.
 
 ## Features
 
