@@ -1134,15 +1134,43 @@ function drawAreaSlab3d(ar, yTop, yBot) {
     quad({x:x0,y:yBot,z:z0},{x:x1,y:yBot,z:z0},{x:x1,y:yBot,z:z1},{x:x0,y:yBot,z:z1});
     quad({x:x0,y:yTop,z:z0},{x:x1,y:yTop,z:z0},{x:x1,y:yTop,z:z1},{x:x0,y:yTop,z:z1});
   }
-  // side walls only along the union's boundary edges (internal shared edges get no wall)
+  // side walls only along the union's boundary edges (internal shared edges get no wall).
+  // Consecutive boundary cells along the same straight edge are merged into one run so a
+  // long wall is a single quad, not one per cell (avoids a stripe at every cell seam).
   const cells = areaCells(ar);
+  function mergeRuns(nums) {
+    const sorted = [...nums].sort((a, b) => a - b);
+    const runs = []; let start = sorted[0], prev = sorted[0];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === prev + 1) { prev = sorted[i]; continue; }
+      runs.push([start, prev]); start = sorted[i]; prev = sorted[i];
+    }
+    if (sorted.length) runs.push([start, prev]);
+    return runs;
+  }
+  const northByRow = new Map(), southByRow = new Map(), westByCol = new Map(), eastByCol = new Map();
   for (const k of cells) {
     const [cx, cy] = k.split(":").map(Number);
-    const X = cx * CELL, Z = -cy * CELL, X1 = (cx + 1) * CELL, Z1 = -(cy + 1) * CELL;
-    if (!cells.has(cx + ":" + (cy-1))) quad({x:X,y:yBot,z:Z},{x:X1,y:yBot,z:Z},{x:X1,y:yTop,z:Z},{x:X,y:yTop,z:Z});
-    if (!cells.has(cx + ":" + (cy+1))) quad({x:X,y:yBot,z:Z1},{x:X1,y:yBot,z:Z1},{x:X1,y:yTop,z:Z1},{x:X,y:yTop,z:Z1});
-    if (!cells.has((cx-1) + ":" + cy)) quad({x:X,y:yBot,z:Z},{x:X,y:yBot,z:Z1},{x:X,y:yTop,z:Z1},{x:X,y:yTop,z:Z});
-    if (!cells.has((cx+1) + ":" + cy)) quad({x:X1,y:yBot,z:Z},{x:X1,y:yBot,z:Z1},{x:X1,y:yTop,z:Z1},{x:X1,y:yTop,z:Z});
+    if (!cells.has(cx + ":" + (cy-1))) (northByRow.get(cy) || northByRow.set(cy, []).get(cy)).push(cx);
+    if (!cells.has(cx + ":" + (cy+1))) (southByRow.get(cy) || southByRow.set(cy, []).get(cy)).push(cx);
+    if (!cells.has((cx-1) + ":" + cy)) (westByCol.get(cx) || westByCol.set(cx, []).get(cx)).push(cy);
+    if (!cells.has((cx+1) + ":" + cy)) (eastByCol.get(cx) || eastByCol.set(cx, []).get(cx)).push(cy);
+  }
+  for (const [cy, xs] of northByRow) for (const [a, b] of mergeRuns(xs)) {
+    const X = a*CELL, X1 = (b+1)*CELL, Z = -cy*CELL;
+    quad({x:X,y:yBot,z:Z},{x:X1,y:yBot,z:Z},{x:X1,y:yTop,z:Z},{x:X,y:yTop,z:Z});
+  }
+  for (const [cy, xs] of southByRow) for (const [a, b] of mergeRuns(xs)) {
+    const X = a*CELL, X1 = (b+1)*CELL, Z1 = -(cy+1)*CELL;
+    quad({x:X,y:yBot,z:Z1},{x:X1,y:yBot,z:Z1},{x:X1,y:yTop,z:Z1},{x:X,y:yTop,z:Z1});
+  }
+  for (const [cx, ys] of westByCol) for (const [a, b] of mergeRuns(ys)) {
+    const X = cx*CELL, Z = -a*CELL, Z1 = -(b+1)*CELL;
+    quad({x:X,y:yBot,z:Z},{x:X,y:yBot,z:Z1},{x:X,y:yTop,z:Z1},{x:X,y:yTop,z:Z});
+  }
+  for (const [cx, ys] of eastByCol) for (const [a, b] of mergeRuns(ys)) {
+    const X1 = (cx+1)*CELL, Z = -a*CELL, Z1 = -(b+1)*CELL;
+    quad({x:X1,y:yBot,z:Z},{x:X1,y:yBot,z:Z1},{x:X1,y:yTop,z:Z1},{x:X1,y:yTop,z:Z});
   }
   const tc = n && project3d({ x: cxSum / n, y: yTop, z: czSum / n });   // one label at the union centre
   if (tc) {
