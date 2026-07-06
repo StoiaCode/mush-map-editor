@@ -65,9 +65,10 @@ export function doExport() {
   }
   // areas that contain at least one exported room
   const outAreas = S.map.areas.filter(a => rooms.some(r => roomInArea(r, a))).map(a => ({ ...a, rects: a.rects.map(rc => ({ ...rc })) }));
-  // transit lines: keep only stations that made the cut; a line needs 2+ remaining stops to be usable
+  // transit lines: keep real stations that made the cut, plus every stub (no room to be "in or
+  // out" of the export); a line needs 2+ remaining stops to be usable
   const outLines = S.map.transitLines
-    .map(l => ({ ...l, stations: l.stations.filter(id => included.has(id)) }))
+    .map(l => ({ ...l, stations: l.stations.filter(e => typeof e === "string" ? included.has(e) : true) }))
     .filter(l => l.stations.length >= 2);
   const zs = rooms.map(r => r.z);
   const title = document.getElementById("expTitle").value.trim();
@@ -162,8 +163,14 @@ export function mergeImport(data) {
       rects: rects.map(rc => ({ x: clampX(rc.x + dx), y: clampY(rc.y + dy), w: rc.w, h: rc.h })) });
   }
   for (const line of (data.transitLines || [])) {
-    const stations = (line.stations || []).map(sid => idMap[sid]).filter(Boolean);  // drop any that didn't survive
-    if (stations.length) S.map.transitLines.push({ id: uid(), name: line.name, color: line.color, stations });
+    const stations = (line.stations || []).map(e => {
+      if (typeof e === "string") return idMap[e] || null;   // real station: remap through the room id map, drop if it didn't survive
+      return { stub: true, id: uid(), name: (e && e.name) || "Unknown Stop" };  // stub: keep, but with a fresh id (avoid collisions on repeat imports)
+    }).filter(Boolean);
+    if (stations.length) S.map.transitLines.push({
+      id: uid(), name: line.name, color: line.color, stations,
+      forwardLabel: line.forwardLabel || "", backwardLabel: line.backwardLabel || ""
+    });
   }
   S.selection = new Set(newIds);
   S.selectedId = newIds[0];

@@ -54,7 +54,11 @@ export function normalize() {
   if (!Array.isArray(map.transitLines)) map.transitLines = [];
   for (const line of map.transitLines) {
     if (!Array.isArray(line.stations)) line.stations = [];
-    line.stations = line.stations.filter(id => map.rooms[id]);   // drop stations whose room no longer exists
+    // real stations (string room ids) with a dangling room are dropped; stub stops
+    // (objects, no room) are kept as long as they're well-formed (have a name)
+    line.stations = line.stations.filter(e => typeof e === "string" ? map.rooms[e] : (e && typeof e.name === "string"));
+    if (line.forwardLabel == null) line.forwardLabel = "";
+    if (line.backwardLabel == null) line.backwardLabel = "";
   }
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);

@@ -176,7 +176,7 @@ export function stationLinesFor(roomId) {
   return S.map.transitLines.filter(line => line.stations.includes(roomId));
 }
 export function createTransitLine(name, color) {
-  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [] };
+  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [], forwardLabel: "", backwardLabel: "" };
   S.map.transitLines.push(line);
   return line;
 }
@@ -185,6 +185,7 @@ export function deleteTransitLine(id) {
   if (S.transitActiveLine === id) S.transitActiveLine = null;
 }
 // Add the room to the line if absent, or remove it (closing the gap) if already present.
+// Only ever called with a real room id (map-click flow) — stub entries are never added this way.
 export function toggleStation(lineId, roomId) {
   const line = S.map.transitLines.find(l => l.id === lineId);
   if (!line) return;
@@ -192,11 +193,29 @@ export function toggleStation(lineId, roomId) {
   if (i === -1) line.stations.push(roomId);
   else line.stations.splice(i, 1);
 }
-// Swap a station with its neighbour (delta = -1 or +1) to reorder the route.
-export function moveStation(lineId, roomId, delta) {
+// A stop is either a room-id string (real station) or {stub:true, id, name} (unmapped placeholder).
+export function entryId(e) { return typeof e === "string" ? e : e.id; }
+export function entryName(e) { return typeof e === "string" ? (S.map.rooms[e] ? S.map.rooms[e].name : "??") : e.name; }
+export function isStub(e) { return typeof e !== "string"; }
+// A stub stop for a line whose station isn't mapped yet — editable only via the transit panel.
+export function addStubStation(lineId, name) {
   const line = S.map.transitLines.find(l => l.id === lineId);
   if (!line) return;
-  const i = line.stations.indexOf(roomId);
+  line.stations.push({ stub: true, id: uid(), name: (name || "").trim() || "Unknown Stop" });
+}
+// Remove any stop (real or stub) by its entryId — used by the panel's per-row ✕.
+export function removeStop(lineId, id) {
+  const line = S.map.transitLines.find(l => l.id === lineId);
+  if (!line) return;
+  const i = line.stations.findIndex(e => entryId(e) === id);
+  if (i !== -1) line.stations.splice(i, 1);
+}
+// Swap a stop with its neighbour (delta = -1 or +1) to reorder the route. Works for
+// both real and stub entries since it matches by entryId rather than raw equality.
+export function moveStation(lineId, id, delta) {
+  const line = S.map.transitLines.find(l => l.id === lineId);
+  if (!line) return;
+  const i = line.stations.findIndex(e => entryId(e) === id);
   const j = i + delta;
   if (i === -1 || j < 0 || j >= line.stations.length) return;
   [line.stations[i], line.stations[j]] = [line.stations[j], line.stations[i]];

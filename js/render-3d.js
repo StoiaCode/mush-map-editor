@@ -106,8 +106,11 @@ export function render3d() {
   for (const line of S.map.transitLines) {
     const color = areaHex(line);
     ctx3d.strokeStyle = color; ctx3d.lineWidth = 2; ctx3d.setLineDash([7, 5]);
-    for (let i = 0; i < line.stations.length - 1; i++) {
-      const pa = pr[line.stations[i]], pb = pr[line.stations[i + 1]];
+    // Stub stops have no room/position — connect the nearest REAL neighbours around any
+    // run of stubs so the line reads as continuous instead of two dead ends.
+    const realIds = line.stations.filter(e => typeof e === "string");
+    for (let i = 0; i < realIds.length - 1; i++) {
+      const pa = pr[realIds[i]], pb = pr[realIds[i + 1]];
       if (!pa || !pb) continue;
       ctx3d.beginPath(); ctx3d.moveTo(pa.sx, pa.sy); ctx3d.lineTo(pb.sx, pb.sy); ctx3d.stroke();
     }

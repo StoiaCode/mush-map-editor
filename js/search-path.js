@@ -47,9 +47,19 @@ export function findPath(startId, endId, allowFly, allowTrain) {
     let n = endId;
     while (n !== startId) {
       const p = prev.get(n);
-      steps.unshift(p.type === "train"
-        ? { type: "train", lineId: p.lineId, lineName: p.lineName, fromId: p.from, toId: n }
-        : { type: "walk", dir: p.dir, fly: p.fly });
+      if (p.type === "train") {
+        // Direction is derived purely from stop order (no cost/BFS implications) — travel
+        // toward a higher index uses forwardLabel, toward a lower index uses backwardLabel.
+        const line = S.map.transitLines.find(l => l.id === p.lineId);
+        let direction = "";
+        if (line) {
+          const fi = line.stations.indexOf(p.from), ti = line.stations.indexOf(n);
+          if (fi !== -1 && ti !== -1) direction = (ti > fi ? line.forwardLabel : line.backwardLabel) || "";
+        }
+        steps.unshift({ type: "train", lineId: p.lineId, lineName: p.lineName, fromId: p.from, toId: n, direction });
+      } else {
+        steps.unshift({ type: "walk", dir: p.dir, fly: p.fly });
+      }
       rooms.unshift(p.from); n = p.from;
     }
     return { steps, rooms };
@@ -114,7 +124,8 @@ export function computePath(startId, endId) {
       dirsHtml = parts.map(part => {
         if (part.kind === "train") {
           const s = part.step;
-          return `<div class="trainstep">🚆 Board the <b>${escapeHtml(s.lineName)}</b> at ${escapeHtml(roomName(s.fromId))}, ride to <b>${escapeHtml(roomName(s.toId))}</b></div>`;
+          const dirTag = s.direction ? ` (${escapeHtml(s.direction)})` : "";
+          return `<div class="trainstep">🚆 Board the <b>${escapeHtml(s.lineName)}</b>${dirTag} at ${escapeHtml(roomName(s.fromId))}, ride to <b>${escapeHtml(roomName(s.toId))}</b></div>`;
         }
         const groups = [];
         for (let i = 0; i < part.steps.length; i += 5) groups.push(part.steps.slice(i, i + 5));

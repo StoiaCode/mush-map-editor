@@ -220,6 +220,7 @@ select { cursor: pointer; }
 #ridePicker .hdr { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
 .ride-linehdr { font-size: 11px; font-weight: 700; margin: 6px 0 3px; }
 .ride-stop { display: block; width: 100%; text-align: left; margin-bottom: 3px; }
+.ride-stop.ride-stub { color: var(--muted); font-style: italic; cursor: default; background: none; border: none; padding: 2px 0; }
 
 /* Transit line panel */
 #transitPanel { max-width: 300px; max-height: 80vh; overflow-y: auto; }
@@ -230,10 +231,14 @@ select { cursor: pointer; }
 .transline-hdr .tl-name { flex: 1; min-width: 0; }
 .transline-hdr .cnt { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .transline-hdr .tl-active, .transline-hdr .tl-del { padding: 3px 7px; font-size: 11px; }
+.tl-dirlabels { display: flex; gap: 6px; margin: 6px 0 2px; }
+.tl-dirlabels input { flex: 1; min-width: 0; }
 .tl-stations { margin-top: 4px; }
 .tl-station { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; }
+.tl-station.stub .tl-stopname { color: var(--muted); font-style: italic; }
 .tl-station .tl-stopnum { color: var(--muted); min-width: 16px; text-align: right; }
 .tl-station .tl-stopname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-station .tl-dirhint { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .tl-station button { padding: 1px 6px; font-size: 10px; }
 
 #searchBox { width: 150px; }

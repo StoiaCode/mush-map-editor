@@ -3,7 +3,8 @@ import { S, viewport, world, svg, dirpicker, dirGrid } from "./state.js";
 import { clamp, escapeHtml, uid, areaHex } from "./utils.js";
 import {
   roomAtCell, createRoom, areaAtCell, mergeAreas, selectSingle, toggleSel,
-  clearSelection, deleteRoom, carve, addExit, deleteArea, stationLinesFor, toggleStation
+  clearSelection, deleteRoom, carve, addExit, deleteArea, stationLinesFor, toggleStation,
+  entryId, isStub
 } from "./model.js";
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
@@ -347,17 +348,25 @@ function openRidePicker(roomId, sx, sy) {
   document.getElementById("rideHdr").textContent = "Ride from " + S.map.rooms[roomId].name;
   const here = S.map.rooms[roomId];
   for (const line of lines) {
-    const others = line.stations.filter(id => id !== roomId && S.map.rooms[id]);
+    const others = line.stations.filter(e => entryId(e) !== roomId);
     if (!others.length) continue;
     const hdr = document.createElement("div");
     hdr.className = "ride-linehdr"; hdr.textContent = line.name; hdr.style.color = areaHex(line);
     list.appendChild(hdr);
-    for (const oid of others) {
-      const r = S.map.rooms[oid];
+    for (const entry of others) {
+      if (isStub(entry)) {
+        // known stop, not yet mapped — shown for awareness, nowhere to navigate to
+        const note = document.createElement("div");
+        note.className = "ride-stop ride-stub";
+        note.textContent = "❓ " + entry.name + " — not yet mapped";
+        list.appendChild(note);
+        continue;
+      }
+      const r = S.map.rooms[entry];
       const btn = document.createElement("button");
       btn.className = "ride-stop";
       btn.textContent = r.name + (r.z !== here.z ? ` (L${r.z})` : "");
-      btn.onclick = () => { closeRidePicker(); gotoRoom(oid); };
+      btn.onclick = () => { closeRidePicker(); gotoRoom(entry); };
       list.appendChild(btn);
     }
   }

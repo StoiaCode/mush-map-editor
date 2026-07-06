@@ -203,8 +203,11 @@ export function drawAreaFlat(ar) {
 function drawTransitLinesFlat(z) {
   for (const line of S.map.transitLines) {
     const c = areaHex(line);
-    for (let i = 0; i < line.stations.length - 1; i++) {
-      const a = S.map.rooms[line.stations[i]], b = S.map.rooms[line.stations[i + 1]];
+    // Stub stops have no coordinates to draw to/from — connect the nearest REAL
+    // neighbours on either side of any run of stubs, so the line reads as continuous.
+    const realIds = line.stations.filter(e => typeof e === "string");
+    for (let i = 0; i < realIds.length - 1; i++) {
+      const a = S.map.rooms[realIds[i]], b = S.map.rooms[realIds[i + 1]];
       if (!a || !b) continue;
       const onA = a.z === z, onB = b.z === z;
       if (onA && onB) {
