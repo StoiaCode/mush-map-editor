@@ -101,6 +101,7 @@
     text-overflow: ellipsis; max-width: 100%;
     display: flex; align-items: center; justify-content: center; height: 100%; width:100%;
   }
+  .room.has-image .rname { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.7); }
   .room.selected { border-color: #fff; box-shadow: 0 0 0 3px var(--accent), 0 3px 10px rgba(0,0,0,.6); }
   .room.linktarget { outline: 2px dashed var(--good); outline-offset: 2px; }
   .room.linksource { outline: 3px solid var(--good); outline-offset: 2px; }
@@ -165,6 +166,10 @@
   .exitrow .tgt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   .exitrow .tgt:hover { color: var(--accent); text-decoration: underline; }
   .exitrow button { padding: 2px 6px; font-size: 11px; }
+  #f_img_wrap { margin: -3px 0 9px; }
+  #f_img_wrap img { display: block; width: 100%; max-height: 140px; object-fit: contain;
+    border-radius: 6px; background: #0f1115; }
+  #f_img_wrap .imgerr { font-size: 11px; color: var(--danger); }
   .flytoggle { opacity: .4; }
   .flytoggle.on { opacity: 1; color: #3cc4b8; border-color: #3cc4b8; }
 
@@ -510,6 +515,7 @@ function normalize() {
     delete r.level;
     if (!r.exits) r.exits = {};
     if (!r.exitFly) r.exitFly = {};   // directions on this room that require flight
+    if (r.imageUrl == null) r.imageUrl = "";
   }
   if (map.currentLayer == null) map.currentLayer = layersPresent()[0];
   // backfill tag labels (older saves / imports won't have them)
@@ -587,7 +593,7 @@ function roomAtCell(z, x, y) {
 function createRoom(z, x, y, name) {
   const id = uid();
   map.rooms[id] = { id, name: name || "New Room", description: "", color: "Slate",
-                    size: "medium", x, y, z, exits: {}, exitFly: {} };
+                    size: "medium", x, y, z, exits: {}, exitFly: {}, imageUrl: "" };
   return map.rooms[id];
 }
 function deleteRoom(id) {
@@ -898,7 +904,13 @@ function makeRoomEl(r, ghost) {
   const c = roomWorldCenter(r);
   el.style.left = c.x + "px"; el.style.top = c.y + "px";
   el.style.width = px + "px"; el.style.height = px + "px";
-  el.style.background = colorOf(r);
+  el.style.backgroundColor = colorOf(r);
+  if (!ghost && r.imageUrl) {
+    // image sits over the color fallback; if it 404s/is slow, the color still shows (no JS needed)
+    el.style.backgroundImage = `url("${r.imageUrl.replace(/"/g, '%22')}")`;
+    el.style.backgroundSize = "cover"; el.style.backgroundPosition = "center";
+    el.classList.add("has-image");
+  }
   el.style.fontSize = (r.size === "small" ? 9 : r.size === "large" ? 12 : 10) + "px";
   if (ghost) el.style.opacity = onion.opacity;
   const tag = map.tagLabels && map.tagLabels[r.color];
@@ -1313,6 +1325,8 @@ function renderInspector() {
         <input type="text" inputmode="numeric" id="f_layer" value="${r.z}" style="width:60px;text-align:center;">
         <button id="f_layer_up" class="iconbtn" title="Move up a layer">+</button>
       </div></div>
+    <div class="field"><label>Image URL</label><input type="text" id="f_img" value="${escapeAttr(r.imageUrl || "")}" placeholder="https://…/room.webp"></div>
+    <div id="f_img_wrap"></div>
     <div class="hint">grid (${r.x}, ${r.y})</div>
   </div>`;
 
@@ -1359,6 +1373,31 @@ function renderInspector() {
   document.getElementById("f_name").onchange = () => commit();
   document.getElementById("f_desc").oninput = e => { r.description = e.target.value; save(); };
   document.getElementById("f_desc").onchange = () => commit();
+  function renderImgPreview(url) {
+    const wrap = document.getElementById("f_img_wrap");
+    wrap.innerHTML = "";
+    if (!url) return;
+    const img = document.createElement("img");
+    img.src = url;
+    img.onerror = () => { wrap.innerHTML = `<div class="imgerr">Couldn't load image from that URL.</div>`; };
+    wrap.appendChild(img);
+  }
+  renderImgPreview(r.imageUrl);
+  document.getElementById("f_img").oninput = e => {
+    r.imageUrl = e.target.value.trim(); save();
+    renderImgPreview(r.imageUrl);
+    const el = world.querySelector(`.room[data-id="${r.id}"]`);
+    if (el) {
+      if (r.imageUrl) {
+        el.style.backgroundImage = `url("${r.imageUrl.replace(/"/g, '%22')}")`;
+        el.style.backgroundSize = "cover"; el.style.backgroundPosition = "center";
+        el.classList.add("has-image");
+      } else {
+        el.style.backgroundImage = ""; el.classList.remove("has-image");
+      }
+    }
+  };
+  document.getElementById("f_img").onchange = () => commit();
   document.getElementById("f_size").onchange = e => { r.size = e.target.value; commit(); render(); };
   document.getElementById("f_layer").onchange = e => changeRoomLayer(r, parseInt(e.target.value, 10));
   document.getElementById("f_layer_up").onclick = () => changeRoomLayer(r, r.z + 1);
@@ -2250,7 +2289,7 @@ function mergeImport(data) {
   for (const r of src) {
     const nid = idMap[r.id];
     const nr = { id: nid, name: r.name || "New Room", description: r.description || "",
-      color: r.color || "Slate", size: r.size || "medium",
+      color: r.color || "Slate", size: r.size || "medium", imageUrl: r.imageUrl || "",
       x: clampX(r.x + dx), y: clampY(r.y + dy), z: r.z, exits: {}, exitFly: {} };
     for (const d of DIRS) {
       const t = r.exits && r.exits[d];
