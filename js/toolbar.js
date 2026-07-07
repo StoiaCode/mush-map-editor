@@ -2,7 +2,7 @@ import { GRID_N, PALETTE } from "./constants.js";
 import { S, viewport } from "./state.js";
 import { clamp, escapeHtml, escapeAttr, areaHex } from "./utils.js";
 import { savePrefs, undo, redo, commit } from "./persistence.js";
-import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub, isDual, bindSecondRoom, unbindSecondRoom } from "./model.js";
+import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub, isDual, unbindSecondRoom } from "./model.js";
 import { render } from "./app.js";
 import { stepLayer, zoomAt, centerOnRoom, centerCellView } from "./render-flat.js";
 import { render3d } from "./render-3d.js";
@@ -30,6 +30,7 @@ export function setMode(mode) {
   if (!S.areaMode) S.areaMergeSource = null;
   if (!S.transitMode) {
     S.transitActiveLine = null;
+    if (S.transitBindPick) { S.transitBindPick = null; const h = document.getElementById("linkHint"); if (h) h.style.display = "none"; }
     const tp = document.getElementById("transitPanel"); if (tp) tp.style.display = "none";
   }
   document.getElementById("linkBtn").classList.toggle("active", S.linkMode);
@@ -100,6 +101,20 @@ document.querySelectorAll(".popclose").forEach(b => {
 const transitCloseBtn = document.querySelector('#transitPanel .popclose');
 if (transitCloseBtn) transitCloseBtn.onclick = () => setMode("none");
 
+// Arm/disarm "click a room on the map to bind it as this stop's second room".
+// Reuses the same status-chip element link mode uses for its pending-pick hint.
+export function setBindPick(pick) {
+  S.transitBindPick = pick;
+  const hint = document.getElementById("linkHint");
+  if (pick) {
+    const name = entryName(S.map.transitLines.find(l => l.id === pick.lineId).stations.find(e => (typeof e === "string" ? e : e.id) === pick.stopId));
+    hint.style.display = ""; hint.textContent = `Click the second room for "${name}" · Esc cancels`;
+  } else if (hint) {
+    hint.style.display = "none";
+  }
+  buildTransitPanel();
+}
+
 // ---------- Transit line panel ----------
 export function buildTransitPanel() {
   const body = document.getElementById("transitBody");
@@ -146,13 +161,13 @@ export function buildTransitPanel() {
       srow.appendChild(up); srow.appendChild(down);
       if (!stub && !dual) {
         // single-room stop: offer binding a second room (e.g. the other-direction platform)
-        const bind = document.createElement("button"); bind.textContent = "+2nd room"; bind.title = "Bind a second room to this stop (e.g. a separate platform), used when riding the other direction";
+        const bind = document.createElement("button"); bind.textContent = "+2nd room";
+        bind.title = "Bind a second room to this stop (e.g. a separate platform), used when riding the other direction";
+        const armed = S.transitBindPick && S.transitBindPick.stopId === id;
+        if (armed) bind.classList.add("active");
         bind.onclick = () => {
-          const q = prompt("Name of the other room for this stop (exact match):");
-          if (!q) return;
-          const other = Object.values(S.map.rooms).find(r => r.name.toLowerCase() === q.trim().toLowerCase());
-          if (!other) { alert("No room with that exact name."); return; }
-          bindSecondRoom(line.id, id, other.id); commit(); buildTransitPanel(); render();
+          if (S.transitBindPick && S.transitBindPick.stopId === id) { setBindPick(null); return; }
+          setBindPick({ lineId: line.id, stopId: id });
         };
         srow.appendChild(bind);
       }

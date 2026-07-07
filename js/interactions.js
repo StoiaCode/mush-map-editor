@@ -4,13 +4,14 @@ import { clamp, escapeHtml, uid, areaHex } from "./utils.js";
 import {
   roomAtCell, createRoom, areaAtCell, mergeAreas, selectSingle, toggleSel,
   clearSelection, deleteRoom, carve, addExit, deleteArea, stationLinesFor, toggleStation,
-  isStub, entryName
+  isStub, entryName, bindSecondRoom
 } from "./model.js";
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
 import { screenToWorld, roomWorldCenter, zoomAt, applyTransform, renderFlat } from "./render-flat.js";
 import { gotoRoom } from "./inspector.js";
 import { clearPath, setPathHint, computePath } from "./search-path.js";
+import { setBindPick } from "./toolbar.js";
 
 // ---------- Pointer interactions ----------
 const CLICK_THRESH = 4;
@@ -32,6 +33,19 @@ viewport.addEventListener("mousedown", e => {
     viewport.classList.add("panning"); e.preventDefault(); return;
   }
   if (e.button !== 0) return;
+  // Binding a stop's second room: the next room click (anywhere, any layer) is consumed here,
+  // ahead of every other mode, so it can't be mistaken for a normal transit-mode station toggle.
+  if (S.transitBindPick) {
+    const roomEl0 = e.target.closest(".room:not(.ghost)");
+    if (roomEl0) {
+      const clickedId = roomEl0.dataset.id;
+      const { lineId, stopId } = S.transitBindPick;
+      if (clickedId === stopId) { alert("That's already this stop's room — pick a different one."); }
+      else { bindSecondRoom(lineId, stopId, clickedId); commit(); render(); }
+      setBindPick(null);
+    }
+    e.preventDefault(); return;
+  }
   // Area mode: draw / move / resize zone rectangles (rooms are click-through here)
   if (S.areaMode) {
     const handle = e.target.closest(".area-resize");
@@ -403,6 +417,7 @@ window.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (S.pendingLink) setPending(null);
     if (S.pathMode) clearPath();
+    if (S.transitBindPick) { setBindPick(null); return; }   // cancel a second-room pick first
     if (S.areaMergeSource) { S.areaMergeSource = null; render(); return; }   // cancel a merge pick first
     S.selectedAreaId = null;
     clearSelection(); closeDirPicker(); render(); return;
