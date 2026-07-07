@@ -1,6 +1,7 @@
 import { DIRS, DIRWORD } from "./constants.js";
 import { S } from "./state.js";
 import { escapeHtml, escapeAttr } from "./utils.js";
+import { resolveStop } from "./model.js";
 import { gotoRoom } from "./inspector.js";
 import { render } from "./app.js";
 import { setMode } from "./toolbar.js";
@@ -47,19 +48,9 @@ export function findPath(startId, endId, allowFly, allowTrain) {
     let n = endId;
     while (n !== startId) {
       const p = prev.get(n);
-      if (p.type === "train") {
-        // Direction is derived purely from stop order (no cost/BFS implications) — travel
-        // toward a higher index uses forwardLabel, toward a lower index uses backwardLabel.
-        const line = S.map.transitLines.find(l => l.id === p.lineId);
-        let direction = "";
-        if (line) {
-          const fi = line.stations.indexOf(p.from), ti = line.stations.indexOf(n);
-          if (fi !== -1 && ti !== -1) direction = (ti > fi ? line.forwardLabel : line.backwardLabel) || "";
-        }
-        steps.unshift({ type: "train", lineId: p.lineId, lineName: p.lineName, fromId: p.from, toId: n, direction });
-      } else {
-        steps.unshift({ type: "walk", dir: p.dir, fly: p.fly });
-      }
+      steps.unshift(p.type === "train"
+        ? { type: "train", lineId: p.lineId, lineName: p.lineName, fromId: p.from, toId: n }
+        : { type: "walk", dir: p.dir, fly: p.fly });
       rooms.unshift(p.from); n = p.from;
     }
     return { steps, rooms };
@@ -80,13 +71,24 @@ export function findPath(startId, endId, allowFly, allowTrain) {
     }
     if (allowTrain) {
       for (const line of S.map.transitLines) {
-        if (!line.stations.includes(cur)) continue;
-        for (const t of line.stations) {
-          if (t === cur || visited.has(t) || !S.map.rooms[t]) continue;
-          visited.add(t);
-          prev.set(t, { from: cur, type: "train", lineId: line.id, lineName: line.name });
-          if (t === endId) return finish(endId);
-          queue.push(t);
+        const stations = line.stations;
+        // find every index where `cur` is boardable (a plain stop, or either side of a dual)
+        for (let i = 0; i < stations.length; i++) {
+          const e = stations[i];
+          const boardableHere = typeof e === "string" ? e === cur : (e && e.dual && (e.a === cur || e.b === cur));
+          if (!boardableHere) continue;
+          for (let j = 0; j < stations.length; j++) {
+            if (j === i) continue;
+            const forward = j > i;
+            // for a dual stop, you can only depart toward `forward` from the side matching that direction
+            if (e && e.dual && (forward ? e.a !== cur : e.b !== cur)) continue;
+            const t = resolveStop(stations[j], forward);
+            if (!t || visited.has(t) || !S.map.rooms[t]) continue;
+            visited.add(t);
+            prev.set(t, { from: cur, type: "train", lineId: line.id, lineName: line.name });
+            if (t === endId) return finish(endId);
+            queue.push(t);
+          }
         }
       }
     }
@@ -124,8 +126,7 @@ export function computePath(startId, endId) {
       dirsHtml = parts.map(part => {
         if (part.kind === "train") {
           const s = part.step;
-          const dirTag = s.direction ? ` (${escapeHtml(s.direction)})` : "";
-          return `<div class="trainstep">🚆 Board the <b>${escapeHtml(s.lineName)}</b>${dirTag} at ${escapeHtml(roomName(s.fromId))}, ride to <b>${escapeHtml(roomName(s.toId))}</b></div>`;
+          return `<div class="trainstep">🚆 Board the <b>${escapeHtml(s.lineName)}</b> at ${escapeHtml(roomName(s.fromId))}, ride to <b>${escapeHtml(roomName(s.toId))}</b></div>`;
         }
         const groups = [];
         for (let i = 0; i < part.steps.length; i += 5) groups.push(part.steps.slice(i, i + 5));

@@ -172,11 +172,37 @@ export function splitArea(id) {
 // Stations are stored in physical route order (for stop-numbering display); lines are
 // back-and-forth (not terminating), so every station on a line reaches every other —
 // pathfinding treats this as all-pairs reachable, never as "adjacent stops only".
+// A stop is one of:
+//   - a room-id string            (an ordinary single-room station)
+//   - { stub:true, id, name }     (a known stop with no mapped room yet)
+//   - { dual:true, id, a, b }     (one stop bound to TWO rooms — e.g. separate platforms —
+//                                  where `a` is the room you're in when riding forward through
+//                                  the sequence and `b` is the room when riding backward)
+export function isStub(e) { return typeof e === "object" && e !== null && !e.dual; }
+export function isDual(e) { return typeof e === "object" && e !== null && e.dual === true; }
+export function entryId(e) { return typeof e === "string" ? e : e.id; }
+export function entryName(e) {
+  if (typeof e === "string") return S.map.rooms[e] ? S.map.rooms[e].name : "??";
+  if (isDual(e)) {
+    const an = S.map.rooms[e.a] ? S.map.rooms[e.a].name : "??";
+    const bn = S.map.rooms[e.b] ? S.map.rooms[e.b].name : "??";
+    return an === bn ? an : an + " / " + bn;
+  }
+  return e.name;
+}
+// Which room you actually arrive in at this stop when traveling in the given direction
+// (forward = toward the end of the stations list). Stubs resolve to null (no room yet).
+export function resolveStop(e, forward) {
+  if (typeof e === "string") return e;
+  if (isDual(e)) return forward ? e.a : e.b;
+  return null;
+}
 export function stationLinesFor(roomId) {
-  return S.map.transitLines.filter(line => line.stations.includes(roomId));
+  return S.map.transitLines.filter(line => line.stations.some(e =>
+    typeof e === "string" ? e === roomId : (isDual(e) && (e.a === roomId || e.b === roomId))));
 }
 export function createTransitLine(name, color) {
-  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [], forwardLabel: "", backwardLabel: "" };
+  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [] };
   S.map.transitLines.push(line);
   return line;
 }
@@ -185,7 +211,7 @@ export function deleteTransitLine(id) {
   if (S.transitActiveLine === id) S.transitActiveLine = null;
 }
 // Add the room to the line if absent, or remove it (closing the gap) if already present.
-// Only ever called with a real room id (map-click flow) — stub entries are never added this way.
+// Only ever called with a real room id (map-click flow) — stub/dual entries aren't touched here.
 export function toggleStation(lineId, roomId) {
   const line = S.map.transitLines.find(l => l.id === lineId);
   if (!line) return;
@@ -193,17 +219,28 @@ export function toggleStation(lineId, roomId) {
   if (i === -1) line.stations.push(roomId);
   else line.stations.splice(i, 1);
 }
-// A stop is either a room-id string (real station) or {stub:true, id, name} (unmapped placeholder).
-export function entryId(e) { return typeof e === "string" ? e : e.id; }
-export function entryName(e) { return typeof e === "string" ? (S.map.rooms[e] ? S.map.rooms[e].name : "??") : e.name; }
-export function isStub(e) { return typeof e !== "string"; }
 // A stub stop for a line whose station isn't mapped yet — editable only via the transit panel.
 export function addStubStation(lineId, name) {
   const line = S.map.transitLines.find(l => l.id === lineId);
   if (!line) return;
   line.stations.push({ stub: true, id: uid(), name: (name || "").trim() || "Unknown Stop" });
 }
-// Remove any stop (real or stub) by its entryId — used by the panel's per-row ✕.
+// Bind a second room onto an existing single-room stop (e.g. the other direction's platform).
+export function bindSecondRoom(lineId, stopId, roomId) {
+  const line = S.map.transitLines.find(l => l.id === lineId);
+  if (!line) return;
+  const i = line.stations.findIndex(e => entryId(e) === stopId);
+  if (i === -1 || typeof line.stations[i] !== "string") return;
+  line.stations[i] = { dual: true, id: uid(), a: line.stations[i], b: roomId };
+}
+// Undo a dual binding, keeping only the "forward" room.
+export function unbindSecondRoom(lineId, stopId) {
+  const line = S.map.transitLines.find(l => l.id === lineId);
+  if (!line) return;
+  const i = line.stations.findIndex(e => entryId(e) === stopId);
+  if (i !== -1 && isDual(line.stations[i])) line.stations[i] = line.stations[i].a;
+}
+// Remove any stop (real, stub, or dual) by its entryId — used by the panel's per-row ✕.
 export function removeStop(lineId, id) {
   const line = S.map.transitLines.find(l => l.id === lineId);
   if (!line) return;
@@ -211,7 +248,7 @@ export function removeStop(lineId, id) {
   if (i !== -1) line.stations.splice(i, 1);
 }
 // Swap a stop with its neighbour (delta = -1 or +1) to reorder the route. Works for
-// both real and stub entries since it matches by entryId rather than raw equality.
+// any entry kind since it matches by entryId rather than raw equality.
 export function moveStation(lineId, id, delta) {
   const line = S.map.transitLines.find(l => l.id === lineId);
   if (!line) return;
@@ -219,8 +256,4 @@ export function moveStation(lineId, id, delta) {
   const j = i + delta;
   if (i === -1 || j < 0 || j >= line.stations.length) return;
   [line.stations[i], line.stations[j]] = [line.stations[j], line.stations[i]];
-}
-// True if some line contains both rooms — the pathfinder's "one board-and-ride step" test.
-export function lineConnects(roomAId, roomBId) {
-  return S.map.transitLines.some(l => l.stations.includes(roomAId) && l.stations.includes(roomBId));
 }

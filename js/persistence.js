@@ -54,11 +54,17 @@ export function normalize() {
   if (!Array.isArray(map.transitLines)) map.transitLines = [];
   for (const line of map.transitLines) {
     if (!Array.isArray(line.stations)) line.stations = [];
-    // real stations (string room ids) with a dangling room are dropped; stub stops
-    // (objects, no room) are kept as long as they're well-formed (have a name)
-    line.stations = line.stations.filter(e => typeof e === "string" ? map.rooms[e] : (e && typeof e.name === "string"));
-    if (line.forwardLabel == null) line.forwardLabel = "";
-    if (line.backwardLabel == null) line.backwardLabel = "";
+    delete line.forwardLabel; delete line.backwardLabel;   // superseded by per-stop dual bindings
+    line.stations = line.stations.map(e => {
+      if (typeof e === "string") return map.rooms[e] ? e : null;
+      if (e && e.dual) {
+        const a = map.rooms[e.a] ? e.a : null, b = map.rooms[e.b] ? e.b : null;
+        if (a && b) return e;
+        if (a || b) return a || b;   // one side is gone — collapse back to a single station
+        return null;
+      }
+      return (e && typeof e.name === "string") ? e : null;   // stub: keep if well-formed
+    }).filter(Boolean);
   }
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);

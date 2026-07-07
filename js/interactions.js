@@ -4,7 +4,7 @@ import { clamp, escapeHtml, uid, areaHex } from "./utils.js";
 import {
   roomAtCell, createRoom, areaAtCell, mergeAreas, selectSingle, toggleSel,
   clearSelection, deleteRoom, carve, addExit, deleteArea, stationLinesFor, toggleStation,
-  entryId, isStub
+  isStub, entryName
 } from "./model.js";
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
@@ -348,7 +348,8 @@ function openRidePicker(roomId, sx, sy) {
   document.getElementById("rideHdr").textContent = "Ride from " + S.map.rooms[roomId].name;
   const here = S.map.rooms[roomId];
   for (const line of lines) {
-    const others = line.stations.filter(e => entryId(e) !== roomId);
+    // exclude the stop the click came from (matches a plain room, or either side of a dual)
+    const others = line.stations.filter(e => typeof e === "string" ? e !== roomId : !(e.dual && (e.a === roomId || e.b === roomId)));
     if (!others.length) continue;
     const hdr = document.createElement("div");
     hdr.className = "ride-linehdr"; hdr.textContent = line.name; hdr.style.color = areaHex(line);
@@ -362,11 +363,13 @@ function openRidePicker(roomId, sx, sy) {
         list.appendChild(note);
         continue;
       }
-      const r = S.map.rooms[entry];
+      const targetId = entry.dual ? entry.a : entry;   // dual: land on the "forward" side by default
+      const r = S.map.rooms[targetId];
+      if (!r) continue;
       const btn = document.createElement("button");
       btn.className = "ride-stop";
-      btn.textContent = r.name + (r.z !== here.z ? ` (L${r.z})` : "");
-      btn.onclick = () => { closeRidePicker(); gotoRoom(entry); };
+      btn.textContent = entryName(entry) + (r.z !== here.z ? ` (L${r.z})` : "");
+      btn.onclick = () => { closeRidePicker(); gotoRoom(targetId); };
       list.appendChild(btn);
     }
   }

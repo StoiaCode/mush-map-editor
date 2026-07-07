@@ -108,7 +108,7 @@ export function render3d() {
     ctx3d.strokeStyle = color; ctx3d.lineWidth = 2; ctx3d.setLineDash([7, 5]);
     // Stub stops have no room/position — connect the nearest REAL neighbours around any
     // run of stubs so the line reads as continuous instead of two dead ends.
-    const realIds = line.stations.filter(e => typeof e === "string");
+    const realIds = line.stations.flatMap(e => typeof e === "string" ? [e] : (e && e.dual ? [e.a, e.b] : []));
     for (let i = 0; i < realIds.length - 1; i++) {
       const pa = pr[realIds[i]], pb = pr[realIds[i + 1]];
       if (!pa || !pb) continue;

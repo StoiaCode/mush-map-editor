@@ -205,7 +205,7 @@ function drawTransitLinesFlat(z) {
     const c = areaHex(line);
     // Stub stops have no coordinates to draw to/from — connect the nearest REAL
     // neighbours on either side of any run of stubs, so the line reads as continuous.
-    const realIds = line.stations.filter(e => typeof e === "string");
+    const realIds = line.stations.flatMap(e => typeof e === "string" ? [e] : (e && e.dual ? [e.a, e.b] : []));
     for (let i = 0; i < realIds.length - 1; i++) {
       const a = S.map.rooms[realIds[i]], b = S.map.rooms[realIds[i + 1]];
       if (!a || !b) continue;

@@ -2,7 +2,7 @@ import { GRID_N, PALETTE } from "./constants.js";
 import { S, viewport } from "./state.js";
 import { clamp, escapeHtml, escapeAttr, areaHex } from "./utils.js";
 import { savePrefs, undo, redo, commit } from "./persistence.js";
-import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub } from "./model.js";
+import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub, isDual, bindSecondRoom, unbindSecondRoom } from "./model.js";
 import { render } from "./app.js";
 import { stepLayer, zoomAt, centerOnRoom, centerCellView } from "./render-flat.js";
 import { render3d } from "./render-3d.js";
@@ -130,37 +130,40 @@ export function buildTransitPanel() {
     });
     row.appendChild(swatches);
 
-    const dirRow = document.createElement("div");
-    dirRow.className = "tl-dirlabels";
-    dirRow.innerHTML = `
-      <input type="text" class="tl-fwd" placeholder="Forward label (e.g. Eastbound)" value="${escapeAttr(line.forwardLabel || "")}">
-      <input type="text" class="tl-bwd" placeholder="Backward label (e.g. Westbound)" value="${escapeAttr(line.backwardLabel || "")}">`;
-    row.appendChild(dirRow);
-    const hint = document.createElement("div");
-    hint.className = "hint"; hint.textContent = "Forward = toward the last stop below; backward = toward the first.";
-    row.appendChild(hint);
-
     const stationsList = document.createElement("div");
     stationsList.className = "tl-stations";
     line.stations.forEach((entry, i) => {
-      const id = entryId(entry), stub = isStub(entry);
+      const id = entryId(entry), stub = isStub(entry), dual = isDual(entry);
       const srow = document.createElement("div");
-      srow.className = "tl-station" + (stub ? " stub" : "");
-      // Preview hint at intermediate stops only — the two endpoints have just one direction,
-      // so labeling them would be misleading. "→" continues onward (forward), "←" goes back.
-      let dirTag = "";
-      if (i > 0 && i < line.stations.length - 1 && (line.forwardLabel || line.backwardLabel)) {
-        dirTag = ` <span class="tl-dirhint">→ ${escapeHtml(line.forwardLabel || "?")} · ← ${escapeHtml(line.backwardLabel || "?")}</span>`;
-      }
+      srow.className = "tl-station" + (stub ? " stub" : "") + (dual ? " dual" : "");
       srow.innerHTML = `<span class="tl-stopnum">${i + 1}</span>` +
-        `<span class="tl-stopname">${stub ? "❓ " : ""}${escapeHtml(entryName(entry))}${stub ? " <i>(unmapped)</i>" : ""}</span>${dirTag}`;
+        `<span class="tl-stopname">${stub ? "❓ " : ""}${escapeHtml(entryName(entry))}` +
+        `${stub ? " <i>(unmapped)</i>" : ""}${dual ? ` <span class="tl-dirhint">→forward / ←backward</span>` : ""}</span>`;
       const up = document.createElement("button"); up.textContent = "▲"; up.disabled = i === 0;
       up.onclick = () => { moveStation(line.id, id, -1); commit(); buildTransitPanel(); render(); };
       const down = document.createElement("button"); down.textContent = "▼"; down.disabled = i === line.stations.length - 1;
       down.onclick = () => { moveStation(line.id, id, 1); commit(); buildTransitPanel(); render(); };
+      srow.appendChild(up); srow.appendChild(down);
+      if (!stub && !dual) {
+        // single-room stop: offer binding a second room (e.g. the other-direction platform)
+        const bind = document.createElement("button"); bind.textContent = "+2nd room"; bind.title = "Bind a second room to this stop (e.g. a separate platform), used when riding the other direction";
+        bind.onclick = () => {
+          const q = prompt("Name of the other room for this stop (exact match):");
+          if (!q) return;
+          const other = Object.values(S.map.rooms).find(r => r.name.toLowerCase() === q.trim().toLowerCase());
+          if (!other) { alert("No room with that exact name."); return; }
+          bindSecondRoom(line.id, id, other.id); commit(); buildTransitPanel(); render();
+        };
+        srow.appendChild(bind);
+      }
+      if (dual) {
+        const unbind = document.createElement("button"); unbind.textContent = "✕2nd"; unbind.title = "Remove the second room, keep only the forward one";
+        unbind.onclick = () => { unbindSecondRoom(line.id, id); commit(); buildTransitPanel(); render(); };
+        srow.appendChild(unbind);
+      }
       const rm = document.createElement("button"); rm.textContent = "✕";
       rm.onclick = () => { removeStop(line.id, id); commit(); buildTransitPanel(); render(); };
-      srow.appendChild(up); srow.appendChild(down); srow.appendChild(rm);
+      srow.appendChild(rm);
       stationsList.appendChild(srow);
     });
     if (!line.stations.length) stationsList.innerHTML = `<div class="hint">No stations yet — click "Edit" then click rooms on the map to add them.</div>`;
@@ -177,8 +180,6 @@ export function buildTransitPanel() {
     body.appendChild(row);
 
     head.querySelector(".tl-name").onchange = e => { line.name = e.target.value.trim() || line.name; commit(); render(); };
-    dirRow.querySelector(".tl-fwd").onchange = e => { line.forwardLabel = e.target.value.trim(); commit(); };
-    dirRow.querySelector(".tl-bwd").onchange = e => { line.backwardLabel = e.target.value.trim(); commit(); };
     editBtn.onclick = () => {
       S.transitActiveLine = (S.transitActiveLine === line.id) ? null : line.id;
       buildTransitPanel();

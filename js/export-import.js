@@ -66,9 +66,17 @@ export function doExport() {
   // areas that contain at least one exported room
   const outAreas = S.map.areas.filter(a => rooms.some(r => roomInArea(r, a))).map(a => ({ ...a, rects: a.rects.map(rc => ({ ...rc })) }));
   // transit lines: keep real stations that made the cut, plus every stub (no room to be "in or
-  // out" of the export); a line needs 2+ remaining stops to be usable
+  // out" of the export); a dual stop collapses to whichever side survived, or is dropped if
+  // neither did. A line needs 2+ remaining stops to be usable.
   const outLines = S.map.transitLines
-    .map(l => ({ ...l, stations: l.stations.filter(e => typeof e === "string" ? included.has(e) : true) }))
+    .map(l => ({ ...l, stations: l.stations.map(e => {
+      if (typeof e === "string") return included.has(e) ? e : null;
+      if (e.dual) {
+        const a = included.has(e.a) ? e.a : null, b = included.has(e.b) ? e.b : null;
+        return (a && b) ? { ...e } : (a || b);
+      }
+      return e;   // stub
+    }).filter(Boolean) }))
     .filter(l => l.stations.length >= 2);
   const zs = rooms.map(r => r.z);
   const title = document.getElementById("expTitle").value.trim();
@@ -165,12 +173,13 @@ export function mergeImport(data) {
   for (const line of (data.transitLines || [])) {
     const stations = (line.stations || []).map(e => {
       if (typeof e === "string") return idMap[e] || null;   // real station: remap through the room id map, drop if it didn't survive
-      return { stub: true, id: uid(), name: (e && e.name) || "Unknown Stop" };  // stub: keep, but with a fresh id (avoid collisions on repeat imports)
+      if (e && e.dual) {
+        const a = idMap[e.a], b = idMap[e.b];
+        return (a && b) ? { dual: true, id: uid(), a, b } : (a || b || null);
+      }
+      return { stub: true, id: uid(), name: (e && e.name) || "Unknown Stop" };  // stub: keep, fresh id (avoid collisions on repeat imports)
     }).filter(Boolean);
-    if (stations.length) S.map.transitLines.push({
-      id: uid(), name: line.name, color: line.color, stations,
-      forwardLabel: line.forwardLabel || "", backwardLabel: line.backwardLabel || ""
-    });
+    if (stations.length) S.map.transitLines.push({ id: uid(), name: line.name, color: line.color, stations });
   }
   S.selection = new Set(newIds);
   S.selectedId = newIds[0];
