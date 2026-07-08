@@ -118,7 +118,7 @@ select { cursor: pointer; }
    sits at the bottom instead of leaving a dead gap (only applies to the room-info section). */
 .insec-info { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .field-grow { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 60px; }
-.field-grow textarea { flex: 1 1 auto; min-height: 40px; }
+.field-grow textarea { flex: 1 1 auto; min-height: 40px; resize: none; }   /* height now follows the layout, not a manual drag */
 .empty-note { padding: 16px 12px; color: var(--muted); line-height: 1.5; }
 .seclabel { font-size:11px; color:var(--muted); display:block; margin-bottom:6px; }
 
