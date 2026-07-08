@@ -107,9 +107,9 @@ export function renderInspector() {
 
   const r = S.map.rooms[S.selectedId];
   let h = `<h3>Room — Layer ${r.z}</h3>`;
-  h += `<div class="insec">
+  h += `<div class="insec insec-info">
     <div class="field"><label>Name</label><input type="text" id="f_name" value="${escapeAttr(r.name)}"></div>
-    <div class="field"><label>Description / notes</label><textarea id="f_desc">${escapeHtml(r.description)}</textarea></div>
+    <div class="field field-grow"><label>Description / notes</label><textarea id="f_desc">${escapeHtml(r.description)}</textarea></div>
     <div class="field"><label>Color tag</label><div class="swatches" id="f_color"></div></div>
     <div class="field"><label>Size (visual only)</label>
       <select id="f_size">
