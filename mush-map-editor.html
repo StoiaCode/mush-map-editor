@@ -74,6 +74,7 @@
     <button id="exportBtn">⬇ Export</button>
     <button id="importBtn">⬆ Import</button>
     <input type="file" id="importFile" accept="application/json" style="display:none">
+    <button id="syncBtn" title="Sync: upload/load/delete this map on the server via a short code.">☁ Sync</button>
     <button id="newMapBtn" class="danger">New</button>
   </div>
 
@@ -138,6 +139,32 @@
   <div id="importSummary"></div>
   <button id="importAdd" class="primary" style="width:100%;margin-bottom:6px;">➕ Add to current map</button>
   <button id="importReplace" class="danger" style="width:100%;">⚠ Replace everything</button>
+</div>
+
+<div id="syncPanel" class="popover">
+  <div class="pop-hdr">Sync map <button class="popclose" data-close="syncPanel">✕</button></div>
+  <div class="syncwarn">⚠ This is <b>temporary</b> storage only, meant to move a map between your own devices or share it with someone else. Anything not loaded or updated again is <b>deleted after 7 days</b>. Do not use this as a backup — use Export for that.</div>
+
+  <div class="syncsec">
+    <div class="explabel">Upload</div>
+    <input type="text" id="syncUploadCode" placeholder="Code to update (blank = new)" maxlength="6" style="width:100%;margin-bottom:6px;">
+    <button id="syncUploadBtn" class="primary" style="width:100%;">☁ Upload current map</button>
+    <div id="syncUploadResult"></div>
+  </div>
+
+  <div class="syncsec">
+    <div class="explabel">Load</div>
+    <input type="text" id="syncLoadCode" placeholder="6-character code" maxlength="6" style="width:100%;margin-bottom:6px;">
+    <button id="syncLoadBtn" style="width:100%;">⬇ Load from code</button>
+  </div>
+
+  <div class="syncsec">
+    <div class="explabel">Delete from server</div>
+    <input type="text" id="syncDeleteCode" placeholder="6-character code" maxlength="6" style="width:100%;margin-bottom:6px;">
+    <button id="syncDeleteBtn" class="danger" style="width:100%;">✕ Delete from server</button>
+  </div>
+
+  <div id="syncStatus" class="hint"></div>
 </div>
 
 <div id="transitPanel" class="popover">

@@ -9,7 +9,28 @@ services:
     expose:
       - "80"
 
+  mush-map-api:
+    build: ./server
+    image: mush-map-api
+    pull_policy: build
+    container_name: mush-map-api
+    restart: unless-stopped
+    environment:
+      # Frontend origin allowed to call this API (CORS). Update if the domain changes.
+      - ALLOWED_ORIGIN=https://map.stoia.red
+      # Must match the CLIENT_KEY constant in js/sync.js exactly - it's a spam-bot filter,
+      # not real auth (it ships readable in the frontend JS). Rotate both sides together.
+      - CLIENT_KEY=7e9d31545e84cc9e90515ff319f245ecc38099cd230dc199
+    volumes:
+      - mush-map-data:/data
+    # No published ports; the reverse proxy reaches this container by name on port 8000.
+    expose:
+      - "8000"
+
 networks:
   default:
     external: true
     name: pangolin
+
+volumes:
+  mush-map-data:

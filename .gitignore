@@ -10,3 +10,5 @@
 !css/**
 !js/
 !js/**
+!server/
+!server/**
