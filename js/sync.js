@@ -10,9 +10,9 @@ const API_BASE = localStorage.getItem("mushSyncApiBase") || "/api";
 
 // Not real auth - this ships readable in the JS bundle. It's a filter against generic
 // spam bots that probe for open POST endpoints without knowing to send this header.
-// Must match CLIENT_KEY in the server's environment (see compose.yaml). Rotate both
-// sides together if it ever needs to change.
-const CLIENT_KEY = "7e9d31545e84cc9e90515ff319f245ecc38099cd230dc199";
+// The placeholder below is substituted at container start (docker-entrypoint.sh) from
+// the CLIENT_KEY env var, which must match the API server's CLIENT_KEY (see compose.yaml).
+const CLIENT_KEY = "__CLIENT_KEY__";
 
 function setStatus(msg, kind) {
   const el = document.getElementById("syncStatus");

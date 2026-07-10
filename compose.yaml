@@ -5,6 +5,11 @@ services:
     pull_policy: build
     container_name: mush-map-editor
     restart: unless-stopped
+    environment:
+      # Baked into js/sync.js at container start (docker-entrypoint.sh). Must match
+      # mush-map-api's CLIENT_KEY below exactly. Set this in Portainer's stack env,
+      # not here - keep it out of the repo. Letters/digits only, e.g. `openssl rand -hex 24`.
+      - CLIENT_KEY=${CLIENT_KEY:?set CLIENT_KEY in the stack environment}
     # No published ports; the reverse proxy reaches this container by name on port 80.
     expose:
       - "80"
@@ -18,9 +23,9 @@ services:
     environment:
       # Frontend origin allowed to call this API (CORS). Update if the domain changes.
       - ALLOWED_ORIGIN=https://map.stoia.red
-      # Must match the CLIENT_KEY constant in js/sync.js exactly - it's a spam-bot filter,
-      # not real auth (it ships readable in the frontend JS). Rotate both sides together.
-      - CLIENT_KEY=7e9d31545e84cc9e90515ff319f245ecc38099cd230dc199
+      # Spam-bot filter, not real auth (see mush-map-editor's CLIENT_KEY above) - must
+      # match exactly. Set in Portainer's stack environment, not here.
+      - CLIENT_KEY=${CLIENT_KEY:?set CLIENT_KEY in the stack environment}
     volumes:
       - mush-map-data:/data
     # No published ports; the reverse proxy reaches this container by name on port 8000.

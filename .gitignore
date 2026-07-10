@@ -5,6 +5,7 @@
 !LICENSE
 !.gitignore
 !Dockerfile
+!docker-entrypoint.sh
 !compose.yaml
 !css/
 !css/**
