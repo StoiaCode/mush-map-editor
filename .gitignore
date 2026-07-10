@@ -5,8 +5,12 @@
 !LICENSE
 !.gitignore
 !Dockerfile
+!docker-entrypoint.sh
 !compose.yaml
+!stack.env.example
 !css/
 !css/**
 !js/
 !js/**
+!server/
+!server/**

@@ -5,11 +5,38 @@ services:
     pull_policy: build
     container_name: mush-map-editor
     restart: unless-stopped
+    # CLIENT_KEY comes from stack.env (see stack.env.example) - not committed to the
+    # repo. Baked into js/sync.js at container start by docker-entrypoint.sh. Must
+    # match mush-map-api's CLIENT_KEY below exactly.
+    env_file:
+      - stack.env
     # No published ports; the reverse proxy reaches this container by name on port 80.
     expose:
       - "80"
+
+  mush-map-api:
+    build: ./server
+    image: mush-map-api
+    pull_policy: build
+    container_name: mush-map-api
+    restart: unless-stopped
+    environment:
+      # Frontend origin allowed to call this API (CORS). Update if the domain changes.
+      - ALLOWED_ORIGIN=https://map.stoia.red
+    # CLIENT_KEY comes from stack.env (see stack.env.example) - a spam-bot filter, not
+    # real auth (see mush-map-editor's CLIENT_KEY above) - must match exactly.
+    env_file:
+      - stack.env
+    volumes:
+      - mush-map-data:/data
+    # No published ports; the reverse proxy reaches this container by name on port 8000.
+    expose:
+      - "8000"
 
 networks:
   default:
     external: true
     name: pangolin
+
+volumes:
+  mush-map-data:

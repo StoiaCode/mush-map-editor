@@ -12,6 +12,7 @@ import { updateViewButtons } from "./toolbar.js";
 // never load and the app would have no pointer/keyboard/export/import behaviour.
 import "./interactions.js";
 import "./export-import.js";
+import "./sync.js";
 
 // ---------- Render dispatcher ----------
 // Central so every other module can trigger a redraw via one import, instead of

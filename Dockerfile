@@ -4,5 +4,7 @@ WORKDIR /www
 COPY mush-map-editor.html /www/index.html
 COPY css /www/css
 COPY js /www/js
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 EXPOSE 80
-CMD ["httpd", "-f", "-v", "-p", "80", "-h", "/www"]
+CMD ["/docker-entrypoint.sh"]

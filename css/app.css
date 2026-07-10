@@ -175,7 +175,18 @@ select { cursor: pointer; }
 .statrow { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; }
 .statrow .val { color: var(--muted); font-variant-numeric: tabular-nums; }
 .statrow .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
-#exportPanel, #importPanel { max-width: 260px; max-height: 80vh; overflow-y: auto; }
+#exportPanel, #importPanel, #syncPanel { max-width: 260px; max-height: 80vh; overflow-y: auto; }
+.syncwarn { background: rgba(226,85,85,.12); border: 1px solid rgba(226,85,85,.4); border-radius: 6px;
+  padding: 7px 9px; font-size: 11px; line-height: 1.5; color: var(--text); margin-bottom: 10px; }
+.syncsec { margin-bottom: 10px; }
+.syncsec:last-of-type { margin-bottom: 6px; }
+.synccode { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.synccode .code { font-family: monospace; font-size: 16px; font-weight: 700; letter-spacing: 1px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 5px 9px; flex: 1; }
+.synccode button { padding: 4px 8px; font-size: 11px; }
+#syncStatus { min-height: 14px; }
+#syncStatus.err { color: var(--danger); }
+#syncStatus.ok { color: var(--good); }
 .expsec { margin-bottom: 10px; }
 .explabel { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px; }
 .checklist { max-height: 130px; overflow-y: auto; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; }
