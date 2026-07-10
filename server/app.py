@@ -1,13 +1,18 @@
 import json
+import logging
 import os
 import secrets
 import sqlite3
 import string
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, g, jsonify, request
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("mush-map-api")
 
 DB_PATH = os.environ.get("DB_PATH", "/data/maps.db")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
@@ -55,6 +60,10 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def client_ip():
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+
+
 def new_code(db):
     for _ in range(20):
         code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
@@ -65,7 +74,7 @@ def new_code(db):
 
 @app.before_request
 def rate_limit():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+    ip = client_ip()
     now = time.monotonic()
     with _rate_lock:
         hits = _rate_state.setdefault(ip, [])
@@ -91,6 +100,12 @@ def add_cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Client-Key"
+    return resp
+
+
+@app.after_request
+def log_request(resp):
+    log.info("%s %s %s %s", client_ip(), request.method, request.path, resp.status_code)
     return resp
 
 
@@ -124,6 +139,7 @@ def create_map():
         (code, json.dumps(data), now_iso()),
     )
     db.commit()
+    log.info("created map %s (%d bytes)", code, len(json.dumps(data)))
     return jsonify(id=code), 201
 
 
@@ -152,6 +168,7 @@ def update_map(code):
         (json.dumps(data), now_iso(), code),
     )
     db.commit()
+    log.info("updated map %s (%d bytes)", code, len(json.dumps(data)))
     return jsonify(id=code), 200
 
 
@@ -163,6 +180,7 @@ def delete_map(code):
         return jsonify(error="Not found or expired."), 404
     db.execute("DELETE FROM maps WHERE id = ?", (code,))
     db.commit()
+    log.info("deleted map %s", code)
     return ("", 204)
 
 
@@ -171,11 +189,13 @@ def cleanup_loop():
         try:
             cutoff = (datetime.now(timezone.utc) - EXPIRY).isoformat()
             db = sqlite3.connect(DB_PATH)
-            db.execute("DELETE FROM maps WHERE last_touched < ?", (cutoff,))
+            cur = db.execute("DELETE FROM maps WHERE last_touched < ?", (cutoff,))
             db.commit()
             db.close()
+            if cur.rowcount:
+                log.info("cleanup: purged %d expired map(s)", cur.rowcount)
         except Exception:
-            pass
+            log.exception("cleanup sweep failed")
         time.sleep(CLEANUP_INTERVAL_SECONDS)
 
 
