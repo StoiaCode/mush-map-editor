@@ -3,7 +3,7 @@ import { S, world, inspector } from "./state.js";
 import { escapeHtml, escapeAttr, areaHex } from "./utils.js";
 import {
   areaCells, deleteArea, splitArea,
-  carve, changeRoomLayer, setExitFly, deleteRoom, clearSelection, selectSingle, stationLinesFor
+  carve, changeRoomLayer, setExitFly, deleteRoom, clearSelection, selectSingle, stationLinesFor, toggleRoomTrait
 } from "./model.js";
 import { commit, save } from "./persistence.js";
 import { render } from "./app.js";
@@ -128,6 +128,8 @@ export function renderInspector() {
     <div class="hint">grid (${r.x}, ${r.y})</div>
   </div>`;
 
+  h += `<div class="insec"><span class="seclabel">Traits</span><div class="trait-chips" id="f_traits"></div></div>`;
+
   h += `<div class="insec">
     <span class="seclabel">Carve (creates + links a neighbour)</span>
     <div class="rose" id="rose">
@@ -175,6 +177,18 @@ export function renderInspector() {
     s.onclick = () => { r.color = p.name; commit(); render(); };
     sw.appendChild(s);
   });
+  const traitWrap = document.getElementById("f_traits");
+  if (!S.map.traits.length) {
+    traitWrap.innerHTML = `<div class="hint">No traits defined yet. Open ✨ Traits in the toolbar to create some.</div>`;
+  } else {
+    S.map.traits.forEach(t => {
+      const chip = document.createElement("button");
+      chip.className = "trait-chip" + (r.traits.includes(t.id) ? " sel" : "");
+      chip.textContent = `${t.emoji} ${t.label || "(unnamed)"}`;
+      chip.onclick = () => { toggleRoomTrait(r.id, t.id); commit(); render(); };
+      traitWrap.appendChild(chip);
+    });
+  }
   // text fields: live autosave on input, single undo step committed on blur/change
   document.getElementById("f_name").oninput = e => { r.name = e.target.value; save(); refreshRoomLabel(r); };
   document.getElementById("f_name").onchange = () => commit();

@@ -55,6 +55,7 @@
     <button id="pathBtn" title="Pathfinder: click the start room, then the destination. Shows the shortest route as directions.">🧭 Path</button>
     <button id="areaBtn" title="Area mode: drag empty space to draw a zone rectangle. Spans all layers. Click an area to move/resize/edit it.">▭ Area</button>
     <button id="transitBtn" title="Transit mode: pick or create a line in the panel, then click rooms to add/remove them as stations.">🚆 Transit</button>
+    <button id="traitsBtn" title="Traits: define emoji markers (e.g. scavenge spots, hazards) and assign them to rooms from the inspector.">✨ Traits</button>
     <button id="legendBtn" title="Color-tag legend: name what each colour means.">🏷 Legend</button>
     <button id="onionBtn" title="Onion-skin: show neighbour layers ghosted through.">👁 Onion</button>
     <button id="statsBtn" title="Map statistics: room counts by layer, colour and area.">📊 Stats</button>
@@ -172,6 +173,13 @@
   <div id="transitBody"></div>
   <button id="transitNewBtn" class="primary" style="width:100%;margin-top:6px;">+ New line</button>
   <div class="empty-note hint" style="padding:8px 0 0;">Click "Edit" on a line, then click rooms on the map to add/remove them as stations.</div>
+</div>
+
+<div id="traitsPanel" class="popover">
+  <div class="pop-hdr">Traits <button class="popclose" data-close="traitsPanel">✕</button></div>
+  <div id="traitsBody"></div>
+  <button id="traitsNewBtn" class="primary" style="width:100%;margin-top:6px;">+ New trait</button>
+  <div class="hint" style="padding:8px 0 0;">Click the emoji or label to rename. Assign traits to a room from its inspector panel.</div>
 </div>
 
 <div id="ridePicker">

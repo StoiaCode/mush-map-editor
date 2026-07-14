@@ -34,7 +34,7 @@ export function roomAtCell(z, x, y) {
 export function createRoom(z, x, y, name) {
   const id = uid();
   S.map.rooms[id] = { id, name: name || "New Room", description: "", color: "Slate",
-                      size: "medium", x, y, z, exits: {}, exitFly: {}, imageUrl: "" };
+                      size: "medium", x, y, z, exits: {}, exitFly: {}, imageUrl: "", traits: [] };
   return S.map.rooms[id];
 }
 export function deleteRoom(id) {
@@ -256,4 +256,24 @@ export function moveStation(lineId, id, delta) {
   const j = i + delta;
   if (i === -1 || j < 0 || j >= line.stations.length) return;
   [line.stations[i], line.stations[j]] = [line.stations[j], line.stations[i]];
+}
+
+// ---------- Traits ----------
+// A trait is a user-defined {id, emoji, label} catalog entry (S.map.traits). Any number
+// can be assigned to a room via its `traits` array of ids. Distinct from the fixed-palette
+// "color tag" (r.color / tagLabels) — traits are open-ended and multi-valued per room.
+export function createTrait(emoji, label) {
+  const trait = { id: uid(), emoji: emoji || "✨", label: label || "New Trait" };
+  S.map.traits.push(trait);
+  return trait;
+}
+export function deleteTrait(id) {
+  S.map.traits = S.map.traits.filter(t => t.id !== id);
+  for (const r of Object.values(S.map.rooms)) r.traits = r.traits.filter(tid => tid !== id);
+}
+export function toggleRoomTrait(roomId, traitId) {
+  const r = S.map.rooms[roomId];
+  if (!r) return;
+  const i = r.traits.indexOf(traitId);
+  if (i === -1) r.traits.push(traitId); else r.traits.splice(i, 1);
 }

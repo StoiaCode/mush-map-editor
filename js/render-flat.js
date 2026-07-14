@@ -278,8 +278,19 @@ export function makeRoomEl(r, ghost) {
     if (r.exits.DOWN) el.appendChild(vbadge("down", "↓", r.exitFly && r.exitFly.DOWN));
     const lines = stationLinesFor(r.id);
     if (lines.length) el.appendChild(trainBadge(lines));
+    if (r.traits && r.traits.length) { const b = traitBadge(r.traits); if (b) el.appendChild(b); }
   }
   return el;
+}
+export function traitBadge(traitIds) {
+  const defs = traitIds.map(id => S.map.traits.find(t => t.id === id)).filter(Boolean);
+  if (!defs.length) return null;
+  const b = document.createElement("div");
+  b.className = "vbadge trait";
+  const shown = defs.slice(0, 3);
+  b.textContent = shown.map(d => d.emoji).join("") + (defs.length > shown.length ? `+${defs.length - shown.length}` : "");
+  b.title = defs.map(d => d.emoji + " " + d.label).join(", ");
+  return b;
 }
 export function vbadge(kind, ch, fly) {
   const b = document.createElement("div");

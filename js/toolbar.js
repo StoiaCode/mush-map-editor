@@ -1,12 +1,12 @@
 import { GRID_N, PALETTE } from "./constants.js";
 import { S, viewport } from "./state.js";
 import { clamp, escapeHtml, escapeAttr, areaHex } from "./utils.js";
-import { savePrefs, undo, redo, commit } from "./persistence.js";
-import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub, isDual, unbindSecondRoom } from "./model.js";
+import { savePrefs, undo, redo, commit, save } from "./persistence.js";
+import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub, isDual, unbindSecondRoom, createTrait, deleteTrait } from "./model.js";
 import { render } from "./app.js";
 import { stepLayer, zoomAt, centerOnRoom, centerCellView } from "./render-flat.js";
 import { render3d } from "./render-3d.js";
-import { buildLegend, buildStats } from "./stats-legend.js";
+import { buildLegend, buildStats, traitCounts } from "./stats-legend.js";
 import { runSearch, jumpNextMatch, setPathHint } from "./search-path.js";
 
 // ---------- Toolbar wiring ----------
@@ -210,9 +210,50 @@ document.getElementById("transitNewBtn").onclick = () => {
   commit(); buildTransitPanel(); render();
 };
 
+// ---------- Traits panel ----------
+export function buildTraitsPanel() {
+  const body = document.getElementById("traitsBody");
+  const tc = traitCounts();
+  body.innerHTML = "";
+  if (!S.map.traits.length) { body.innerHTML = `<div class="hint">No traits yet — click "+ New trait" below.</div>`; return; }
+  for (const t of S.map.traits) {
+    const row = document.createElement("div");
+    row.className = "traitrow";
+    const emoji = document.createElement("input");
+    emoji.type = "text"; emoji.className = "trait-emoji-input"; emoji.value = t.emoji; emoji.maxLength = 8;
+    const label = document.createElement("input");
+    label.type = "text"; label.value = t.label; label.placeholder = "Label";
+    const cnt = document.createElement("span");
+    cnt.className = "cnt"; cnt.textContent = tc[t.id] || 0; cnt.title = (tc[t.id] || 0) + " room(s) with this trait";
+    const del = document.createElement("button");
+    del.className = "danger"; del.textContent = "✕";
+    row.appendChild(emoji); row.appendChild(label); row.appendChild(cnt); row.appendChild(del);
+    body.appendChild(row);
+    emoji.addEventListener("input", () => { t.emoji = emoji.value; save(); });
+    emoji.addEventListener("change", () => { commit(); buildTraitsPanel(); render(); });
+    label.addEventListener("input", () => { t.label = label.value; save(); });
+    label.addEventListener("change", () => { commit(); buildTraitsPanel(); render(); });
+    del.onclick = () => {
+      if (confirm(`Delete trait "${t.emoji} ${t.label}"? It will be removed from every room that has it.`)) {
+        deleteTrait(t.id); commit(); buildTraitsPanel(); render();
+      }
+    };
+  }
+}
+document.getElementById("traitsBtn").onclick = () => {
+  const panel = document.getElementById("traitsPanel");
+  if (panel.style.display === "block") { panel.style.display = "none"; return; }
+  buildTraitsPanel();
+  positionPopover(panel, document.getElementById("traitsBtn"));
+};
+document.getElementById("traitsNewBtn").onclick = () => {
+  createTrait("✨", "New Trait");
+  commit(); buildTraitsPanel(); render();
+};
+
 // close popovers when clicking elsewhere
 const POPS = { legendPanel: "legendBtn", onionPanel: "onionBtn", statsPanel: "statsBtn",
-               exportPanel: "exportBtn", importPanel: "importBtn" };
+               exportPanel: "exportBtn", importPanel: "importBtn", traitsPanel: "traitsBtn" };
 document.addEventListener("mousedown", e => {
   for (const id of Object.keys(POPS)) {
     const panel = document.getElementById(id);

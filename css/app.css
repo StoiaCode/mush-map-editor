@@ -95,6 +95,7 @@ select { cursor: pointer; }
 .vbadge.down { bottom: -9px; right: -9px; }
 .vbadge.fly { border-color: #3cc4b8; color: #3cc4b8; }
 .vbadge.train { bottom: -9px; left: -9px; font-size: 9px; }
+.vbadge.trait { top: -9px; left: -9px; font-size: 11px; }
 
 .exitlabel {
   font-size: 10px; fill: var(--muted); font-weight: 700;
@@ -125,6 +126,13 @@ select { cursor: pointer; }
 .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 .swatch { width: 22px; height: 22px; border-radius: 5px; cursor: pointer; border: 2px solid transparent; }
 .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+
+.trait-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.trait-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; font-size: 12px;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); cursor: pointer;
+}
+.trait-chip.sel { border-color: var(--accent); background: var(--accent2); color: #fff; }
 
 /* Compass + vertical carve rose */
 .rose { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
@@ -256,6 +264,14 @@ select { cursor: pointer; }
 .tl-station .tl-stopname { flex: 1; min-width: 0; white-space: normal; word-break: break-word; }
 .tl-station .tl-dirhint { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .tl-station button { padding: 1px 6px; font-size: 10px; }
+
+/* Traits panel */
+#traitsPanel { max-width: 300px; max-height: 80vh; overflow-y: auto; }
+.traitrow { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+.traitrow .trait-emoji-input { width: 40px; text-align: center; font-size: 15px; flex: none; }
+.traitrow input[type=text]:not(.trait-emoji-input) { flex: 1; min-width: 0; }
+.traitrow .cnt { color: var(--muted); min-width: 20px; text-align: right; font-variant-numeric: tabular-nums; }
+.traitrow button { padding: 3px 7px; font-size: 11px; }
 
 #searchBox { width: 150px; }
 #pathResult {

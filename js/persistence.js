@@ -5,7 +5,7 @@ import { layersPresent } from "./model.js";
 import { render } from "./app.js";
 
 // ---------- Persistence ----------
-export function defaultMap() { return { version: 2, rooms: {}, areas: [], transitLines: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
+export function defaultMap() { return { version: 2, rooms: {}, areas: [], transitLines: [], traits: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
 
 export function save() {
   if (S.saveTimer) clearTimeout(S.saveTimer);
@@ -66,12 +66,19 @@ export function normalize() {
       return (e && typeof e.name === "string") ? e : null;   // stub: keep if well-formed
     }).filter(Boolean);
   }
+  // drop malformed trait definitions (missing id/emoji/label), then filter every room's
+  // assigned trait ids down to ones that still exist in the catalog
+  if (!Array.isArray(map.traits)) map.traits = [];
+  map.traits = map.traits.filter(t => t && typeof t.id === "string" && typeof t.emoji === "string" && typeof t.label === "string");
+  const traitIds = new Set(map.traits.map(t => t.id));
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);
     delete r.level;
     if (!r.exits) r.exits = {};
     if (!r.exitFly) r.exitFly = {};   // directions on this room that require flight
     if (r.imageUrl == null) r.imageUrl = "";
+    if (!Array.isArray(r.traits)) r.traits = [];
+    r.traits = r.traits.filter(id => traitIds.has(id));
   }
   if (map.currentLayer == null) map.currentLayer = layersPresent()[0];
   // backfill tag labels (older saves / imports won't have them)

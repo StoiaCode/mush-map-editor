@@ -11,6 +11,11 @@ export function colorCounts() {
   for (const r of Object.values(S.map.rooms)) c[r.color] = (c[r.color] || 0) + 1;
   return c;
 }
+export function traitCounts() {
+  const c = {};
+  for (const r of Object.values(S.map.rooms)) for (const tid of r.traits) c[tid] = (c[tid] || 0) + 1;
+  return c;
+}
 export function connectionCount() {
   const seen = new Set();
   for (const r of Object.values(S.map.rooms))
@@ -56,6 +61,12 @@ export function buildStats() {
   if (S.map.areas.length) {
     h += `<div class="stathdr">Rooms per area</div>`;
     for (const ar of S.map.areas) h += `<div class="statrow"><span><span class="dot" style="background:${areaHex(ar)}"></span>${escapeHtml(ar.name)}</span><span class="val">${roomsInArea(ar)}</span></div>`;
+  }
+  const tc = traitCounts();
+  const usedTraits = S.map.traits.filter(t => tc[t.id] > 0);
+  if (usedTraits.length) {
+    h += `<div class="stathdr">By trait</div>`;
+    for (const t of usedTraits) h += `<div class="statrow"><span>${t.emoji} ${escapeHtml(t.label)}</span><span class="val">${tc[t.id]}</span></div>`;
   }
   if (S.map.transitLines.length) {
     const totalStops = S.map.transitLines.reduce((n, l) => n + l.stations.length, 0);

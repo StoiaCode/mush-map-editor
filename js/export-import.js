@@ -84,7 +84,7 @@ export function doExport() {
   const out = {
     version: 2, partial: true,
     meta: { title, author, date: new Date().toISOString().slice(0, 10), rooms: rooms.length },
-    rooms: outRooms, areas: outAreas, transitLines: outLines, tagLabels: S.map.tagLabels,
+    rooms: outRooms, areas: outAreas, transitLines: outLines, tagLabels: S.map.tagLabels, traits: S.map.traits,
     currentLayer: Math.min(...zs)
   };
   const slug = (title || "mush-map-partial").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -145,6 +145,15 @@ export function mergeImport(data) {
   if (!src.length) return;
   const idMap = {};
   for (const r of src) idMap[r.id] = uid();
+  // trait catalog entries always get fresh ids on import (same accepted-duplication
+  // approach used for transit lines below), then each room's trait ids remap through it
+  const traitIdMap = {};
+  for (const t of (data.traits || [])) {
+    if (!t || typeof t.id !== "string") continue;
+    const nt = { id: uid(), emoji: t.emoji || "✨", label: t.label || "New Trait" };
+    traitIdMap[t.id] = nt.id;
+    S.map.traits.push(nt);
+  }
   // find a uniform cell shift so imported rooms don't overlap existing ones
   const occ = new Set(Object.values(S.map.rooms).map(r => r.z + ":" + r.x + ":" + r.y));
   const collides = (dx, dy) => src.some(r => occ.has(r.z + ":" + (r.x + dx) + ":" + (r.y + dy)));
@@ -162,7 +171,8 @@ export function mergeImport(data) {
     const nid = idMap[r.id];
     const nr = { id: nid, name: r.name || "New Room", description: r.description || "",
       color: r.color || "Slate", size: r.size || "medium", imageUrl: r.imageUrl || "",
-      x: clampX(r.x + dx), y: clampY(r.y + dy), z: r.z, exits: {}, exitFly: {} };
+      x: clampX(r.x + dx), y: clampY(r.y + dy), z: r.z, exits: {}, exitFly: {},
+      traits: Array.isArray(r.traits) ? r.traits.map(id => traitIdMap[id]).filter(Boolean) : [] };
     for (const d of DIRS) {
       const t = r.exits && r.exits[d];
       if (t && idMap[t]) { nr.exits[d] = idMap[t]; if (r.exitFly && r.exitFly[d]) nr.exitFly[d] = true; }
