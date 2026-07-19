@@ -9,9 +9,17 @@ import {
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
 import { screenToWorld, zoomAt, renderWeb } from "./render-web.js";
-import { closeFullProfile } from "./inspector.js";
+import { closeFullProfile, openFullProfile } from "./inspector.js";
 
 function nodeCenter(ch) { return { x: ch.x + NODE_SIZE / 2, y: ch.y + NODE_SIZE / 2 }; }
+
+// Manual double-click detection for nodes: renderWeb() removes and recreates
+// every .node element on each click (even a plain select), which breaks the
+// browser's native dblclick tracking — it requires both clicks to land on
+// the same DOM element instance, and by the second click this one's already
+// been swapped for a new one. Compare by character id + time instead.
+const DBLCLICK_MS = 400;
+let lastNodeClick = null;
 
 // ---------- Link mode: pick source, then target ----------
 export function setPendingLink(id) {
@@ -62,6 +70,13 @@ viewport.addEventListener("mousedown", e => {
       else { setPendingLink(null); }
       e.stopPropagation(); e.preventDefault(); return;
     }
+    const now = Date.now();
+    if (lastNodeClick && lastNodeClick.id === id && now - lastNodeClick.time < DBLCLICK_MS) {
+      lastNodeClick = null;
+      selectCharacter(id); openFullProfile();
+      e.preventDefault(); return;
+    }
+    lastNodeClick = { id, time: now };
     selectCharacter(id); render();
     const ch = S.map.characters[id];
     S.drag = { type:"node-move", id, x0:e.clientX, y0:e.clientY, sx:ch.x, sy:ch.y, moved:false };
@@ -135,7 +150,11 @@ window.addEventListener("mouseup", e => {
   }
 });
 
-// double-click empty space (Web view) to create a character
+// double-click empty space (Web view) to create a character. Double-clicking
+// a node is handled in the mousedown handler above (see lastNodeClick) since
+// the native dblclick event doesn't reliably fire on nodes — this listener
+// still guards against nodes so a stray dblclick there can't also create a
+// stacked new character.
 viewport.addEventListener("dblclick", e => {
   if (S.view !== "web" || S.linkMode || S.circleMode) return;
   if (e.target.closest(".node") || e.target.closest(".ann-label") || e.target.closest(".ann-resize")) return;
