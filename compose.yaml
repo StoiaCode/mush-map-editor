@@ -14,6 +14,18 @@ services:
     expose:
       - "80"
 
+  character-tracker:
+    build: ./character-tracker
+    image: character-tracker
+    pull_policy: build
+    container_name: character-tracker
+    restart: unless-stopped
+    # No env_file - unlike mush-map-editor, this app has no sync API / CLIENT_KEY to
+    # substitute at container start; it's purely local-storage, static files only.
+    # No published ports; the reverse proxy reaches this container by name on port 80.
+    expose:
+      - "80"
+
   mush-map-api:
     build: ./server
     image: mush-map-api
