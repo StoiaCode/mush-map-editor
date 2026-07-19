@@ -43,6 +43,13 @@ docker compose up -d --build
 Maps are stored per browser via localStorage, so each visitor keeps their own
 data. Use the JSON export for backups.
 
+`compose.yaml` also builds a `character-tracker` service from
+[`character-tracker/`](character-tracker/) — a separate, independent
+container (own image, own Dockerfile) for the character relationship tracker
+app that lives alongside this one in the repo. `docker compose up -d --build`
+builds and runs both; route a different hostname to it via the same
+reverse-proxy pattern (container name, port 80).
+
 ## Sync API (optional)
 
 `compose.yaml` also defines `mush-map-api`, a small Flask + sqlite service

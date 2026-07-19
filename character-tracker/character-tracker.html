@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Character Relationship Tracker</title>
+<!--
+  Character Relationship Tracker — first brainstorm pass
+  Built to match the UI/UX of the MUSH Map Editor in this repo. Meant to be
+  lifted out to its own host later; shares no code with the map editor.
+-->
+<meta name="description" content="Track characters you meet — clan, sect, coterie, relationships, notes and images — on a freeform relationship web.">
+<meta name="theme-color" content="#5b9dff">
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2314161c'/><circle cx='11' cy='13' r='5' fill='%235b9dff'/><circle cx='22' cy='16' r='4' fill='%23e87cc4'/><line x1='11' y1='13' x2='22' y2='16' stroke='%23353d4a' stroke-width='2'/></svg>">
+
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <span class="title">🕸️ Character Tracker</span>
+
+    <div class="seg" id="viewseg">
+      <button data-view="web" class="active">Web</button>
+      <button data-view="gallery">Gallery</button>
+      <button data-view="groups">Groups</button>
+    </div>
+
+    <span id="groupFieldWrap" style="display:none;">
+      <select id="groupField"></select>
+    </span>
+
+    <span class="seg">
+      <button class="iconbtn" id="undoBtn" title="Undo (Ctrl+Z)">↶</button>
+      <button class="iconbtn" id="redoBtn" title="Redo (Ctrl+Y)">↷</button>
+    </span>
+
+    <button id="newCharBtn">+ Character</button>
+    <button id="linkBtn" title="Link mode: click one character, then another, to draw a labeled relationship between them.">🔗 Link</button>
+    <button id="circleBtn" title="Circle mode: drag across empty space to draw a freeform group (coterie, faction, hangout — whatever you want to cluster visually).">◯ Circle</button>
+
+    <input type="text" id="searchBox" placeholder="🔍 Search…">
+    <span id="searchInfo" class="statuschip"></span>
+    <span id="linkHint" class="statuschip" style="display:none;color:var(--good)"></span>
+
+    <span id="zoomctl">
+      <button class="iconbtn" id="zoomOut">−</button>
+      <span class="statuschip" id="zoomLabel">100%</span>
+      <button class="iconbtn" id="zoomIn">+</button>
+      <button id="zoomReset" title="Reset view">Reset</button>
+    </span>
+
+    <span class="spacer"></span>
+    <span class="statuschip" id="saveStatus"></span>
+    <button id="exportBtn">⬇ Export</button>
+    <button id="importBtn">⬆ Import</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+    <button id="newMapBtn" class="danger">New</button>
+  </div>
+
+  <div id="main">
+    <div id="viewport">
+      <div id="world">
+        <svg id="svglayer"></svg>
+        <!-- character nodes + group circles injected here -->
+      </div>
+    </div>
+
+    <div id="galleryView" style="display:none;"></div>
+    <div id="groupsView" style="display:none;"></div>
+
+    <div id="inspector"></div>
+  </div>
+</div>
+
+<div id="edgePicker" class="popover"></div>
+
+<div id="fullProfile" class="popover" style="display:none;"></div>
+
+<div id="importPanel" class="popover">
+  <div class="pop-hdr">Import <button class="popclose" data-close="importPanel">✕</button></div>
+  <div id="importSummary"></div>
+  <button id="importAdd" class="primary" style="width:100%;margin-bottom:6px;">➕ Add to current map</button>
+  <button id="importReplace" class="danger" style="width:100%;">⚠ Replace everything</button>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
