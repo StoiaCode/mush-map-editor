@@ -3,7 +3,7 @@ import { S, inspector, fullProfile } from "./state.js";
 import { escapeHtml, escapeAttr, colorOf } from "./utils.js";
 import {
   deleteCharacter, addTag, removeTag, addImageUrl, removeImageUrl, moveImageUrl, primaryImage,
-  relationshipsFor, otherEnd, createRelationship, updateRelationshipLabel, deleteRelationship,
+  effectiveRelationshipsFor, otherEnd, createRelationship, updateRelationshipLabel, deleteRelationship,
   deleteAnnotation, charactersInAnnotation, clearSelection, selectCharacter,
   catalogEntries, createCatalogEntry,
 } from "./model.js";
@@ -24,6 +24,7 @@ export function renderInspector() {
         <b>Click a node</b> to select & edit it.<br>
         <b>Drag a node</b> to reposition it anywhere.</p>
         <p class="hint"><b>🔗 Link mode</b>: click one character, then another, to draw a labeled relationship between them. Click a relationship line to relabel or remove it.</p>
+        <p class="hint">Characters who share a coterie are automatically bonded as allies (shown as a faint dashed line) — no need to link them by hand. Click that line, or edit its label in the full profile, to give it something more specific.</p>
         <p class="hint"><b>◯ Circle mode</b>: drag across empty space to draw a freeform group — good for coteries, hangout spots, factions, anything you want to visually cluster.</p>
         <p class="hint"><b>Ctrl+Z / Ctrl+Y</b> undo / redo · <b>Del</b> delete selection · <b>Esc</b> deselect.</p>
       </div>`;
@@ -45,7 +46,7 @@ export function renderInspector() {
         <input type="text" id="q_tagadd" placeholder="Add a tag, press Enter…" style="margin-top:5px;"></div>
     </div>
     <div class="insec">
-      <span class="seclabel">Relationships (${relationshipsFor(ch.id).length})</span>
+      <span class="seclabel">Relationships (${effectiveRelationshipsFor(ch.id).length})</span>
       <div id="q_rels"></div>
     </div>
     <div class="insec">
@@ -59,13 +60,13 @@ export function renderInspector() {
   for (const { kind } of CATALOG_KINDS) bindCatalogField(document.getElementById("q_" + kind), ch, kind);
 
   const relsWrap = document.getElementById("q_rels");
-  const rels = relationshipsFor(ch.id);
-  if (!rels.length) relsWrap.innerHTML = `<div class="hint">None yet — use 🔗 Link mode on the Web view, or add one from the full profile.</div>`;
+  const rels = effectiveRelationshipsFor(ch.id);
+  if (!rels.length) relsWrap.innerHTML = `<div class="hint">None yet — sharing a coterie auto-bonds you as allies, or use 🔗 Link mode on the Web view for anything more specific.</div>`;
   else for (const rel of rels) {
     const other = S.map.characters[otherEnd(rel, ch.id)];
     const row = document.createElement("div");
-    row.className = "exitrow";
-    row.innerHTML = `<span class="tgt" data-goto="${other.id}">${escapeHtml(other.name)}</span><span class="hint">${escapeHtml(rel.label || "—")}</span>`;
+    row.className = "exitrow" + (rel.implicit ? " rel-row-implicit" : "");
+    row.innerHTML = `<span class="tgt" data-goto="${other.id}">${escapeHtml(other.name)}</span><span class="hint">${escapeHtml(rel.label || "—")}${rel.implicit ? " · coterie" : ""}</span>`;
     relsWrap.appendChild(row);
   }
   relsWrap.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => gotoCharacter(el.dataset.goto));
@@ -274,22 +275,35 @@ export function renderFullProfile() {
   document.getElementById("fp_imgadd").onkeydown = e => { if (e.key === "Enter") document.getElementById("fp_imgaddbtn").click(); };
 
   const relsWrap = document.getElementById("fp_rels");
-  const rels = relationshipsFor(ch.id);
-  if (!rels.length) relsWrap.innerHTML = `<div class="hint">No relationships yet.</div>`;
+  const rels = effectiveRelationshipsFor(ch.id);
+  if (!rels.length) relsWrap.innerHTML = `<div class="hint">No relationships yet. Sharing a coterie auto-bonds characters as allies — see the Affiliations toolbar button.</div>`;
   else for (const rel of rels) {
     const other = S.map.characters[otherEnd(rel, ch.id)];
     if (!other) continue;
     const row = document.createElement("div");
-    row.className = "exitrow";
-    row.innerHTML = `
-      <span class="tgt" data-goto="${other.id}">${escapeHtml(other.name)}</span>
-      <input type="text" value="${escapeAttr(rel.label)}" data-rel="${rel.id}" placeholder="label…" style="width:110px;">
-      <button data-delrel="${rel.id}">✕</button>`;
+    if (rel.implicit) {
+      row.className = "exitrow rel-row-implicit";
+      row.innerHTML = `
+        <span class="tgt" data-goto="${other.id}">${escapeHtml(other.name)}</span>
+        <input type="text" value="${escapeAttr(rel.label)}" data-ifrom="${rel.fromId}" data-ito="${rel.toId}" placeholder="label…" style="width:110px;">
+        <span class="hint" title="Automatic, from sharing a coterie — edit the label to make it a real relationship">auto</span>`;
+    } else {
+      row.className = "exitrow";
+      row.innerHTML = `
+        <span class="tgt" data-goto="${other.id}">${escapeHtml(other.name)}</span>
+        <input type="text" value="${escapeAttr(rel.label)}" data-rel="${rel.id}" placeholder="label…" style="width:110px;">
+        <button data-delrel="${rel.id}">✕</button>`;
+    }
     relsWrap.appendChild(row);
   }
   relsWrap.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => { closeFullProfile(); gotoCharacter(el.dataset.goto); });
   relsWrap.querySelectorAll("[data-rel]").forEach(inp => inp.onchange = e => { updateRelationshipLabel(e.target.dataset.rel, e.target.value); commit(); });
   relsWrap.querySelectorAll("[data-delrel]").forEach(b => b.onclick = () => { deleteRelationship(b.dataset.delrel); commit(); render(); });
+  // editing an implicit bond's label formalizes it — creates a real explicit relationship
+  relsWrap.querySelectorAll("[data-ifrom]").forEach(inp => inp.onchange = e => {
+    createRelationship(e.target.dataset.ifrom, e.target.dataset.ito, e.target.value.trim());
+    commit(); render();
+  });
 
   document.getElementById("fp_reladd").onclick = () => {
     const row = document.getElementById("fp_reladdrow");

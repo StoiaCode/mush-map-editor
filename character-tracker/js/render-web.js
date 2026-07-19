@@ -1,7 +1,7 @@
 import { NODE_SIZE, WORLD_SIZE } from "./constants.js";
 import { S, viewport, world, svg, zoomLabel } from "./state.js";
 import { colorOf, hexA, escapeHtml, clamp, initials } from "./utils.js";
-import { relationshipsFor, primaryImage } from "./model.js";
+import { primaryImage, allImpliedRelationships } from "./model.js";
 
 // ---------- View transform (fluid — free (x,y), no grid cells) ----------
 export function applyTransform() {
@@ -38,12 +38,15 @@ export function renderWeb() {
   for (const ann of S.map.annotations) drawAnnotation(ann);
   if (S.circleMode && S.circleDraft) drawDraftCircle(S.circleDraft);
 
-  const drawn = new Set();
+  // implicit coterie bonds drawn first (fainter), so explicit relationships sit on top
+  for (const rel of allImpliedRelationships()) {
+    const a = S.map.characters[rel.fromId], b = S.map.characters[rel.toId];
+    if (a && b) drawImpliedRelationship(a, b, rel);
+  }
   for (const rel of S.map.relationships) {
     const a = S.map.characters[rel.fromId], b = S.map.characters[rel.toId];
     if (!a || !b) continue;
     drawRelationship(a, b, rel);
-    drawn.add(rel.id);
   }
   if (S.linkMode && S.pendingLink) {
     const a = S.map.characters[S.pendingLink];
@@ -104,6 +107,35 @@ function drawRelationship(a, b, rel) {
     txt.textContent = rel.label;
     svg.appendChild(txt);
   }
+}
+// Coterie-mates without an explicit relationship: a faint dashed "ally" line,
+// clickable to formalize into a real relationship (see interactions.js's
+// .rel-hit-implicit handling) but with nothing to delete since it's derived,
+// not stored.
+function drawImpliedRelationship(a, b, rel) {
+  const ns = "http://www.w3.org/2000/svg";
+  const ca = charCenter(a), cb = charCenter(b);
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", ca.x); line.setAttribute("y1", ca.y);
+  line.setAttribute("x2", cb.x); line.setAttribute("y2", cb.y);
+  line.setAttribute("stroke", "#5b9dff"); line.setAttribute("stroke-width", "1.5");
+  line.setAttribute("stroke-dasharray", "4,5"); line.setAttribute("opacity", "0.4");
+  line.setAttribute("class", "rel-line-implicit");
+  svg.appendChild(line);
+  const hit = document.createElementNS(ns, "line");
+  hit.setAttribute("x1", ca.x); hit.setAttribute("y1", ca.y);
+  hit.setAttribute("x2", cb.x); hit.setAttribute("y2", cb.y);
+  hit.setAttribute("stroke", "transparent"); hit.setAttribute("stroke-width", "16");
+  hit.setAttribute("class", "rel-hit-implicit");
+  hit.dataset.from = rel.fromId; hit.dataset.to = rel.toId;
+  hit.style.pointerEvents = "stroke";
+  svg.appendChild(hit);
+  const mx = (ca.x + cb.x) / 2, my = (ca.y + cb.y) / 2;
+  const txt = document.createElementNS(ns, "text");
+  txt.setAttribute("x", mx); txt.setAttribute("y", my - 6);
+  txt.setAttribute("text-anchor", "middle"); txt.setAttribute("class", "rel-label rel-label-implicit");
+  txt.textContent = rel.label + " (coterie)";
+  svg.appendChild(txt);
 }
 function drawPendingLink(a) {
   // a faint marker on the pending source; the live line to the cursor is handled in interactions.js

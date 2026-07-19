@@ -4,6 +4,7 @@ import { clamp, escapeHtml } from "./utils.js";
 import {
   createCharacter, deleteCharacter, selectCharacter, selectAnnotation, clearSelection,
   createAnnotation, deleteAnnotation, createRelationship, updateRelationshipLabel, deleteRelationship,
+  impliedRelationship,
 } from "./model.js";
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
@@ -34,7 +35,10 @@ viewport.addEventListener("mousedown", e => {
   if (e.button !== 0) return;
 
   const relHit = e.target.closest(".rel-hit");
-  if (relHit) { openEdgePickerForExisting(relHit.dataset.rel, e.clientX, e.clientY); e.preventDefault(); return; }
+  if (relHit) { openEdgePickerForExisting(relHit.dataset.rel, e.clientX, e.clientY); e.stopPropagation(); e.preventDefault(); return; }
+
+  const impliedHit = e.target.closest(".rel-hit-implicit");
+  if (impliedHit) { openEdgePickerForNew(impliedHit.dataset.from, impliedHit.dataset.to, e.clientX, e.clientY); e.stopPropagation(); e.preventDefault(); return; }
 
   const handle = e.target.closest(".ann-resize");
   if (handle) {
@@ -155,9 +159,12 @@ function positionPicker(el, sx, sy) {
 function openEdgePickerForNew(fromId, toId, sx, sy) {
   const a = S.map.characters[fromId], b = S.map.characters[toId];
   S.edgePicker = { edgeId:null, fromId, toId };
+  // pre-fill with the implicit coterie-bond label, if these two already have one —
+  // saving as-is just formalizes it; typing something else overrides it
+  const implied = impliedRelationship(fromId, toId);
   edgePicker.innerHTML = `
     <div class="hdr">Relationship: <b>${escapeHtml(a.name)}</b> ↔ <b>${escapeHtml(b.name)}</b></div>
-    <input type="text" id="ep_label" placeholder="e.g. sire, rival, ally…" style="width:100%;margin-bottom:8px;">
+    <input type="text" id="ep_label" value="${escapeHtml(implied ? implied.label : "")}" placeholder="e.g. sire, rival, ally…" style="width:100%;margin-bottom:8px;">
     <div style="display:flex;gap:6px;">
       <button class="primary" id="ep_save" style="flex:1;">Save</button>
       <button id="ep_cancel">Cancel</button>

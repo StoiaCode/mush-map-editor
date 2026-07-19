@@ -81,6 +81,9 @@ select { cursor: pointer; }
 .rel-label { font-size: 10px; fill: var(--muted); font-weight: 700; paint-order: stroke; stroke: #0f1115; stroke-width: 3px; }
 .rel-line { pointer-events: none; }
 .rel-hit:hover { stroke: rgba(91,157,255,.18) !important; }
+.rel-label-implicit { font-style: italic; font-weight: 500; opacity: .8; }
+.rel-line-implicit { pointer-events: none; }
+.rel-hit-implicit:hover { stroke: rgba(91,157,255,.12) !important; }
 
 /* Freeform grouping circles */
 .ann-label {
@@ -130,6 +133,7 @@ select { cursor: pointer; }
 .exitrow .tgt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .exitrow .tgt:hover { color: var(--accent); text-decoration: underline; }
 .exitrow button { padding: 2px 6px; font-size: 11px; }
+.rel-row-implicit input[type=text] { font-style: italic; opacity: .85; }
 
 /* Popovers */
 .popover {

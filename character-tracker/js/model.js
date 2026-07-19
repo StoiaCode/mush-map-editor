@@ -107,6 +107,53 @@ export function deleteRelationship(id) {
   S.map.relationships = S.map.relationships.filter(r => r.id !== id);
 }
 
+// ---------- Implicit coterie bonds ----------
+// Sharing a coterie is treated as an automatic "ally" bond — nothing is
+// stored for it, it's just computed on the fly, so there's nothing to clean
+// up if a coterie is renamed, deleted, or someone leaves it. An explicit
+// relationship between the same pair (any label) always takes precedence
+// and suppresses the implicit one; editing an implicit bond's label (in the
+// UI) is how you "overwrite" it — that simply creates a real explicit edge.
+function pairHasExplicitRelationship(aId, bId) {
+  return S.map.relationships.some(r =>
+    (r.fromId === aId && r.toId === bId) || (r.fromId === bId && r.toId === aId));
+}
+export function impliedRelationship(aId, bId) {
+  if (aId === bId) return null;
+  const a = S.map.characters[aId], b = S.map.characters[bId];
+  if (!a || !b || !a.coterieId || a.coterieId !== b.coterieId) return null;
+  if (pairHasExplicitRelationship(aId, bId)) return null;
+  return { fromId: aId, toId: bId, label: "ally", implicit: true };
+}
+export function impliedRelationshipsFor(id) {
+  const ch = S.map.characters[id];
+  if (!ch || !ch.coterieId) return [];
+  return Object.values(S.map.characters)
+    .filter(o => o.id !== id && o.coterieId === ch.coterieId)
+    .map(o => impliedRelationship(id, o.id))
+    .filter(Boolean);
+}
+export function effectiveRelationshipsFor(id) {
+  return [...relationshipsFor(id), ...impliedRelationshipsFor(id)];
+}
+// One entry per unordered pair (for drawing the web view, where each bond is a single line)
+export function allImpliedRelationships() {
+  const seen = new Set();
+  const out = [];
+  for (const ch of Object.values(S.map.characters)) {
+    if (!ch.coterieId) continue;
+    for (const other of Object.values(S.map.characters)) {
+      if (other.id === ch.id || other.coterieId !== ch.coterieId) continue;
+      const key = [ch.id, other.id].sort().join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const rel = impliedRelationship(ch.id, other.id);
+      if (rel) out.push(rel);
+    }
+  }
+  return out;
+}
+
 // ---------- Freeform grouping circles ----------
 export function createAnnotation(x0, y0, x1, y1, name, color) {
   const ann = {
