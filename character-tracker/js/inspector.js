@@ -1,10 +1,11 @@
-import { PALETTE, CLAN_SUGGESTIONS, SECT_SUGGESTIONS } from "./constants.js";
+import { PALETTE, CATALOG_KINDS } from "./constants.js";
 import { S, inspector, fullProfile } from "./state.js";
 import { escapeHtml, escapeAttr, colorOf } from "./utils.js";
 import {
   deleteCharacter, addTag, removeTag, addImageUrl, removeImageUrl, moveImageUrl, primaryImage,
   relationshipsFor, otherEnd, createRelationship, updateRelationshipLabel, deleteRelationship,
   deleteAnnotation, charactersInAnnotation, clearSelection, selectCharacter,
+  catalogEntries, createCatalogEntry,
 } from "./model.js";
 import { commit, save } from "./persistence.js";
 import { render } from "./app.js";
@@ -37,11 +38,9 @@ export function renderInspector() {
       <div class="qc-portrait" style="${img ? `background-image:url('${escapeAttr(img)}')` : `background-color:${colorOf(ch)}`}"></div>
       <div class="field"><label>Name</label><input type="text" id="q_name" value="${escapeAttr(ch.name)}"></div>
       <div class="field"><label>Colour tag</label><div class="swatches" id="q_color"></div></div>
-      <div class="field"><label>Clan / Sect / Coterie</label>
-        <input type="text" id="q_clan" placeholder="Clan" value="${escapeAttr(ch.clan)}" style="margin-bottom:4px;">
-        <input type="text" id="q_sect" placeholder="Sect" value="${escapeAttr(ch.sect)}" style="margin-bottom:4px;">
-        <input type="text" id="q_coterie" placeholder="Coterie" value="${escapeAttr(ch.coterie)}">
-      </div>
+      <div class="field"><label>Clan</label><div id="q_clan" style="margin-bottom:4px;"></div></div>
+      <div class="field"><label>Sect</label><div id="q_sect" style="margin-bottom:4px;"></div></div>
+      <div class="field"><label>Coterie</label><div id="q_coterie"></div></div>
       <div class="field"><label>Tags</label><div class="trait-chips" id="q_tags"></div>
         <input type="text" id="q_tagadd" placeholder="Add a tag, press Enter…" style="margin-top:5px;"></div>
     </div>
@@ -57,6 +56,7 @@ export function renderInspector() {
 
   bindSwatches(document.getElementById("q_color"), ch, () => { commit(); render(); });
   bindTags(document.getElementById("q_tags"), document.getElementById("q_tagadd"), ch);
+  for (const { kind } of CATALOG_KINDS) bindCatalogField(document.getElementById("q_" + kind), ch, kind);
 
   const relsWrap = document.getElementById("q_rels");
   const rels = relationshipsFor(ch.id);
@@ -72,10 +72,6 @@ export function renderInspector() {
 
   document.getElementById("q_name").oninput = e => { ch.name = e.target.value; save(); refreshNodeLabel(ch); };
   document.getElementById("q_name").onchange = () => commit();
-  for (const [id, field] of [["q_clan","clan"],["q_sect","sect"],["q_coterie","coterie"]]) {
-    document.getElementById(id).oninput = e => { ch[field] = e.target.value; save(); };
-    document.getElementById(id).onchange = () => commit();
-  }
   document.getElementById("q_openFull").onclick = () => openFullProfile();
   document.getElementById("q_del").onclick = () => {
     if (confirm(`Delete "${ch.name}"? Their relationships will be removed too.`)) { deleteCharacter(ch.id); clearSelection(); commit(); render(); }
@@ -131,6 +127,43 @@ function bindTags(chipWrap, addInput, ch) {
     addTag(ch, addInput.value); addInput.value = ""; commit(); render();
   };
 }
+// Strict-select catalog field: pick an existing clan/sect/coterie entry, or
+// "+ Add new…" to reveal an inline text box that creates one and selects it.
+// Reused for all three fields, in both the quick card and the full profile.
+function bindCatalogField(wrap, ch, kind) {
+  const idField = kind + "Id";
+  function draw() {
+    const entries = catalogEntries(kind);
+    wrap.innerHTML = `<select class="catsel">
+      <option value="">— None —</option>
+      ${entries.map(e => `<option value="${escapeAttr(e.id)}"${ch[idField] === e.id ? " selected" : ""}>${escapeHtml(e.name)}</option>`).join("")}
+      <option value="__new__">+ Add new…</option>
+    </select>`;
+    wrap.querySelector(".catsel").onchange = e => {
+      if (e.target.value === "__new__") { drawAdd(); return; }
+      ch[idField] = e.target.value || null;
+      commit(); render();
+    };
+  }
+  function drawAdd() {
+    wrap.innerHTML = `<div style="display:flex;gap:6px;">
+      <input type="text" class="catnew" placeholder="New ${escapeAttr(kind)} name…" style="flex:1;">
+      <button class="primary catok">Add</button>
+      <button class="catcancel">✕</button>
+    </div>`;
+    const inp = wrap.querySelector(".catnew");
+    inp.focus();
+    const confirmAdd = () => {
+      const id = createCatalogEntry(kind, inp.value);
+      if (!id) return;
+      ch[idField] = id; commit(); render();
+    };
+    wrap.querySelector(".catok").onclick = confirmAdd;
+    inp.onkeydown = e => { if (e.key === "Enter") confirmAdd(); };
+    wrap.querySelector(".catcancel").onclick = () => draw();
+  }
+  draw();
+}
 export function refreshNodeLabel(ch) {
   const el = document.querySelector(`.node[data-id="${ch.id}"] .nname`);
   if (el) el.textContent = ch.name;
@@ -163,10 +196,10 @@ export function renderFullProfile() {
         <div class="field"><label>Colour tag</label><div class="swatches" id="fp_color"></div></div>
       </div>
       <div class="fp-sec">
-        <span class="seclabel">Affiliations</span>
-        <div class="field"><label>Clan</label><input type="text" id="fp_clan" list="clanList" value="${escapeAttr(ch.clan)}"></div>
-        <div class="field"><label>Sect</label><input type="text" id="fp_sect" list="sectList" value="${escapeAttr(ch.sect)}"></div>
-        <div class="field"><label>Coterie</label><input type="text" id="fp_coterie" value="${escapeAttr(ch.coterie)}"></div>
+        <span class="seclabel">Affiliations <span class="hint">(manage the lists from 🏷 Affiliations in the toolbar)</span></span>
+        <div class="field"><label>Clan</label><div id="fp_clan"></div></div>
+        <div class="field"><label>Sect</label><div id="fp_sect"></div></div>
+        <div class="field"><label>Coterie</label><div id="fp_coterie"></div></div>
       </div>
       <div class="fp-sec">
         <span class="seclabel">Your relationship</span>
@@ -193,9 +226,7 @@ export function renderFullProfile() {
         <div id="fp_reladdrow" style="display:none;margin-top:6px;"></div>
       </div>
       <div class="fp-sec"><button class="danger" id="fp_del" style="width:100%">Delete character</button></div>
-    </div>
-    <datalist id="clanList">${CLAN_SUGGESTIONS.map(c => `<option value="${escapeAttr(c)}">`).join("")}</datalist>
-    <datalist id="sectList">${SECT_SUGGESTIONS.map(c => `<option value="${escapeAttr(c)}">`).join("")}</datalist>`;
+    </div>`;
 
   document.getElementById("fp_close").onclick = () => { closeFullProfile(); render(); };
   bindSwatches(document.getElementById("fp_color"), ch, () => { commit(); render(); });
@@ -204,12 +235,11 @@ export function renderFullProfile() {
   document.getElementById("fp_name").onchange = () => commit();
   document.getElementById("fp_desc").oninput = e => { ch.description = e.target.value; save(); };
   document.getElementById("fp_desc").onchange = () => commit();
-  for (const [id, field] of [["fp_clan","clan"],["fp_sect","sect"],["fp_coterie","coterie"],["fp_myrel","myRelationship"]]) {
-    document.getElementById(id).oninput = e => { ch[field] = e.target.value; save(); };
-    document.getElementById(id).onchange = () => commit();
-  }
+  document.getElementById("fp_myrel").oninput = e => { ch.myRelationship = e.target.value; save(); };
+  document.getElementById("fp_myrel").onchange = () => commit();
   document.getElementById("fp_features").oninput = e => { ch.notableFeatures = e.target.value; save(); };
   document.getElementById("fp_features").onchange = () => commit();
+  for (const { kind } of CATALOG_KINDS) bindCatalogField(document.getElementById("fp_" + kind), ch, kind);
 
   bindTags(document.getElementById("fp_tags"), document.getElementById("fp_tagadd"), ch);
 

@@ -1,5 +1,8 @@
 import { S } from "./state.js";
 import { uid } from "./utils.js";
+import { CATALOG_KINDS } from "./constants.js";
+
+const CATALOG_KEY = Object.fromEntries(CATALOG_KINDS.map(k => [k.kind, k.catalog]));
 
 // ---------- Selection ----------
 export function selectCharacter(id) { S.selectedId = id || null; S.selectedAnnotationId = null; }
@@ -11,7 +14,7 @@ export function createCharacter(x, y, name) {
   const id = uid();
   S.map.characters[id] = {
     id, name: name || "New Character", description: "",
-    imageUrls: [], clan: "", sect: "", coterie: "",
+    imageUrls: [], clanId: null, sectId: null, coterieId: null,
     myRelationship: "", notableFeatures: "", tags: [],
     color: "Slate", x, y,
   };
@@ -41,6 +44,45 @@ export function moveImageUrl(ch, idx, delta) {
   [ch.imageUrls[idx], ch.imageUrls[j]] = [ch.imageUrls[j], ch.imageUrls[idx]];
 }
 export function primaryImage(ch) { return ch.imageUrls && ch.imageUrls[0] || ""; }
+
+// ---------- Catalogs (clan / sect / coterie — a shared, user-built list of
+// named entries per kind, referenced from characters by id so a rename or
+// typo fix in one place updates everyone who uses it) ----------
+export function catalogList(kind) { return S.map[CATALOG_KEY[kind]]; }
+export function catalogEntries(kind) { return [...catalogList(kind)].sort((a, b) => a.name.localeCompare(b.name)); }
+export function catalogName(kind, id) {
+  if (!id) return "";
+  const e = catalogList(kind).find(x => x.id === id);
+  return e ? e.name : "";
+}
+export function findCatalogEntryByName(kind, name) {
+  const norm = String(name || "").trim().toLowerCase();
+  return catalogList(kind).find(e => e.name.trim().toLowerCase() === norm) || null;
+}
+export function createCatalogEntry(kind, name) {
+  name = String(name || "").trim();
+  if (!name) return null;
+  const existing = findCatalogEntryByName(kind, name);
+  if (existing) return existing.id;
+  const id = uid();
+  catalogList(kind).push({ id, name });
+  return id;
+}
+export function renameCatalogEntry(kind, id, name) {
+  name = String(name || "").trim();
+  if (!name) return;
+  const e = catalogList(kind).find(x => x.id === id);
+  if (e) e.name = name;
+}
+export function deleteCatalogEntry(kind, id) {
+  S.map[CATALOG_KEY[kind]] = catalogList(kind).filter(e => e.id !== id);
+  const field = kind + "Id";
+  for (const ch of Object.values(S.map.characters)) if (ch[field] === id) ch[field] = null;
+}
+export function catalogUsageCount(kind, id) {
+  const field = kind + "Id";
+  return Object.values(S.map.characters).filter(ch => ch[field] === id).length;
+}
 
 // ---------- Relationships (graph edges between characters) ----------
 export function relationshipsFor(id) {
@@ -93,18 +135,18 @@ export function computeSearchMatches() {
   S.searchMatches = Object.values(S.map.characters)
     .filter(ch =>
       ch.name.toLowerCase().includes(term) ||
-      ch.clan.toLowerCase().includes(term) ||
-      ch.sect.toLowerCase().includes(term) ||
-      ch.coterie.toLowerCase().includes(term) ||
+      catalogName("clan", ch.clanId).toLowerCase().includes(term) ||
+      catalogName("sect", ch.sectId).toLowerCase().includes(term) ||
+      catalogName("coterie", ch.coterieId).toLowerCase().includes(term) ||
       ch.tags.some(t => t.toLowerCase().includes(term)))
     .map(ch => ch.id);
 }
 
 // ---------- Grouping (for the Groups view) ----------
-export function groupCharacters(field) {
+export function groupCharacters(kind) {
   const groups = new Map();
   for (const ch of Object.values(S.map.characters)) {
-    const key = (ch[field] || "").trim() || "(unspecified)";
+    const key = catalogName(kind, ch[kind + "Id"]).trim() || "(unspecified)";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(ch);
   }

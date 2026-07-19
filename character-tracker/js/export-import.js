@@ -1,6 +1,7 @@
 import { S } from "./state.js";
+import { CATALOG_KINDS } from "./constants.js";
 import { uid, escapeHtml } from "./utils.js";
-import { clearSelection } from "./model.js";
+import { clearSelection, createCatalogEntry } from "./model.js";
 import { commit, normalize, resetHistory, save, defaultMap } from "./persistence.js";
 import { render } from "./app.js";
 import { centerOnPoint } from "./render-web.js";
@@ -61,6 +62,24 @@ export function mergeImport(data) {
   if (!src.length) return;
   const idMap = {};
   for (const ch of src) idMap[ch.id] = uid();
+  // Catalogs: find-or-create by name in the CURRENT map's catalogs, so an
+  // imported "Toreador" merges into an existing one instead of duplicating it.
+  // catalogIdMap[kind] maps the imported entry's old id -> the resulting id here.
+  const catalogIdMap = {};
+  for (const { kind, catalog } of CATALOG_KINDS) {
+    catalogIdMap[kind] = {};
+    for (const entry of (data[catalog] || [])) {
+      if (entry && entry.id && entry.name) catalogIdMap[kind][entry.id] = createCatalogEntry(kind, entry.name);
+    }
+  }
+  // Legacy exports (pre-catalog) carried clan/sect/coterie as plain strings —
+  // fall back to creating/finding a catalog entry straight from that text.
+  function resolveCatalogId(ch, kind) {
+    const idField = kind + "Id";
+    if (ch[idField]) return catalogIdMap[kind][ch[idField]] || null;
+    if (typeof ch[kind] === "string" && ch[kind].trim()) return createCatalogEntry(kind, ch[kind]);
+    return null;
+  }
   // offset imported positions so they don't stack exactly on top of existing nodes
   const maxX = Math.max(0, ...Object.values(S.map.characters).map(c => c.x));
   const minX = Math.min(0, ...src.map(c => c.x));
@@ -71,7 +90,7 @@ export function mergeImport(data) {
     S.map.characters[nid] = {
       id: nid, name: ch.name || "New Character", description: ch.description || "",
       imageUrls: Array.isArray(ch.imageUrls) ? [...ch.imageUrls] : [],
-      clan: ch.clan || "", sect: ch.sect || "", coterie: ch.coterie || "",
+      clanId: resolveCatalogId(ch, "clan"), sectId: resolveCatalogId(ch, "sect"), coterieId: resolveCatalogId(ch, "coterie"),
       myRelationship: ch.myRelationship || "", notableFeatures: ch.notableFeatures || "",
       tags: Array.isArray(ch.tags) ? [...ch.tags] : [], color: ch.color || "Slate",
       x: (ch.x || 0) + dx, y: ch.y || 0,

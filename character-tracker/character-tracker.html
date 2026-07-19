@@ -39,6 +39,7 @@
     <button id="newCharBtn">+ Character</button>
     <button id="linkBtn" title="Link mode: click one character, then another, to draw a labeled relationship between them.">🔗 Link</button>
     <button id="circleBtn" title="Circle mode: drag across empty space to draw a freeform group (coterie, faction, hangout — whatever you want to cluster visually).">◯ Circle</button>
+    <button id="affBtn" title="Affiliations: rename or delete your clan/sect/coterie lists.">🏷 Affiliations</button>
 
     <input type="text" id="searchBox" placeholder="🔍 Search…">
     <span id="searchInfo" class="statuschip"></span>
@@ -77,6 +78,12 @@
 <div id="edgePicker" class="popover"></div>
 
 <div id="fullProfile" class="popover" style="display:none;"></div>
+
+<div id="affPanel" class="popover">
+  <div class="pop-hdr">Affiliations <button class="popclose" data-close="affPanel">✕</button></div>
+  <div id="affBody"></div>
+  <div class="hint" style="padding-top:6px;">Renaming updates every character using that entry. Deleting sets them back to "— None —".</div>
+</div>
 
 <div id="importPanel" class="popover">
   <div class="pop-hdr">Import <button class="popclose" data-close="importPanel">✕</button></div>

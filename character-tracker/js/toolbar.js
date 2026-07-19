@@ -1,8 +1,11 @@
-import { NODE_SIZE, GROUP_FIELDS } from "./constants.js";
+import { NODE_SIZE, GROUP_FIELDS, CATALOG_KINDS } from "./constants.js";
 import { S, viewport, galleryEl, groupsEl } from "./state.js";
-import { clamp } from "./utils.js";
-import { undo, redo, commit } from "./persistence.js";
-import { createCharacter, selectCharacter, computeSearchMatches } from "./model.js";
+import { clamp, escapeAttr } from "./utils.js";
+import { undo, redo, commit, save } from "./persistence.js";
+import {
+  createCharacter, selectCharacter, computeSearchMatches,
+  catalogEntries, catalogUsageCount, createCatalogEntry, renameCatalogEntry, deleteCatalogEntry,
+} from "./model.js";
 import { render } from "./app.js";
 import { zoomAt, screenToWorld, centerOnPoint } from "./render-web.js";
 import { openFullProfile, closeFullProfile } from "./inspector.js";
@@ -76,6 +79,52 @@ groupsEl.addEventListener("click", e => {
   render();
 });
 
+// ---------- Affiliations panel (rename/delete clan/sect/coterie catalog entries) ----------
+export function buildAffiliationsPanel() {
+  const body = document.getElementById("affBody");
+  body.innerHTML = "";
+  for (const { kind, label } of CATALOG_KINDS) {
+    const section = document.createElement("div");
+    section.innerHTML = `<div class="seclabel" style="margin-top:10px;">${label}</div>`;
+    const entries = catalogEntries(kind);
+    if (!entries.length) section.innerHTML += `<div class="hint">None yet.</div>`;
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "catrow";
+      const n = catalogUsageCount(kind, entry.id);
+      row.innerHTML = `<input type="text" value="${escapeAttr(entry.name)}">
+        <span class="cnt" title="${n} character${n !== 1 ? "s" : ""} using this ${kind}">${n}</span>
+        <button class="danger">✕</button>`;
+      const nameInput = row.querySelector("input");
+      nameInput.addEventListener("input", () => { renameCatalogEntry(kind, entry.id, nameInput.value); save(); });
+      nameInput.addEventListener("change", () => { commit(); buildAffiliationsPanel(); render(); });
+      row.querySelector("button").onclick = () => {
+        const msg = n
+          ? `Delete "${entry.name}"? ${n} character${n !== 1 ? "s" : ""} using it will be set back to "— None —".`
+          : `Delete "${entry.name}"?`;
+        if (confirm(msg)) { deleteCatalogEntry(kind, entry.id); commit(); buildAffiliationsPanel(); render(); }
+      };
+      section.appendChild(row);
+    }
+    const addBtn = document.createElement("button");
+    addBtn.textContent = "+ New " + label;
+    addBtn.style.width = "100%"; addBtn.style.marginTop = "4px";
+    addBtn.onclick = () => {
+      const name = prompt(`Name of the new ${label.toLowerCase()}:`);
+      if (name === null) return;
+      if (createCatalogEntry(kind, name)) { commit(); buildAffiliationsPanel(); render(); }
+    };
+    section.appendChild(addBtn);
+    body.appendChild(section);
+  }
+}
+document.getElementById("affBtn").onclick = () => {
+  const panel = document.getElementById("affPanel");
+  if (panel.style.display === "block") { panel.style.display = "none"; return; }
+  buildAffiliationsPanel();
+  positionPopover(panel, document.getElementById("affBtn"));
+};
+
 // ---------- Popovers ----------
 export function positionPopover(panel, btn) {
   const r = btn.getBoundingClientRect();
@@ -87,7 +136,7 @@ export function positionPopover(panel, btn) {
 document.querySelectorAll(".popclose").forEach(b => {
   b.onclick = () => { document.getElementById(b.dataset.close).style.display = "none"; };
 });
-const POPS = { importPanel: "importBtn" };
+const POPS = { importPanel: "importBtn", affPanel: "affBtn" };
 document.addEventListener("mousedown", e => {
   for (const id of Object.keys(POPS)) {
     const panel = document.getElementById(id);

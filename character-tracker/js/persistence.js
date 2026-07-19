@@ -1,9 +1,10 @@
-import { STORE_KEY, HIST_MAX } from "./constants.js";
+import { STORE_KEY, HIST_MAX, CATALOG_KINDS } from "./constants.js";
 import { S, saveStatus } from "./state.js";
 import { render } from "./app.js";
+import { createCatalogEntry } from "./model.js";
 
 // ---------- Persistence ----------
-export function defaultMap() { return { version: 1, characters: {}, relationships: [], annotations: [] }; }
+export function defaultMap() { return { version: 2, characters: {}, relationships: [], annotations: [], clans: [], sects: [], coteries: [] }; }
 
 export function save() {
   if (S.saveTimer) clearTimeout(S.saveTimer);
@@ -29,13 +30,30 @@ export function normalize() {
   if (!map.characters) map.characters = {};
   if (!Array.isArray(map.relationships)) map.relationships = [];
   if (!Array.isArray(map.annotations)) map.annotations = [];
+  for (const kind of CATALOG_KINDS) if (!Array.isArray(map[kind.catalog])) map[kind.catalog] = [];
   for (const ch of Object.values(map.characters)) {
     if (!Array.isArray(ch.imageUrls)) ch.imageUrls = [];
     if (!Array.isArray(ch.tags)) ch.tags = [];
-    for (const f of ["description","clan","sect","coterie","myRelationship","notableFeatures"]) if (ch[f] == null) ch[f] = "";
+    for (const f of ["description","myRelationship","notableFeatures"]) if (ch[f] == null) ch[f] = "";
     if (ch.color == null) ch.color = "Slate";
     if (typeof ch.x !== "number") ch.x = 0;
     if (typeof ch.y !== "number") ch.y = 0;
+    // migrate the old free-text clan/sect/coterie fields into shared catalog
+    // entries (find-or-create by name, so characters that already share a
+    // typed value converge on one entry instead of duplicating it)
+    for (const { kind } of CATALOG_KINDS) {
+      const idField = kind + "Id";
+      if (ch[idField] === undefined && typeof ch[kind] === "string" && ch[kind].trim()) {
+        ch[idField] = createCatalogEntry(kind, ch[kind]);
+      }
+      if (ch[idField] === undefined) ch[idField] = null;
+      delete ch[kind];
+    }
+  }
+  // drop dangling catalog references (entry deleted/missing since the character was saved)
+  for (const { kind, catalog } of CATALOG_KINDS) {
+    const ids = new Set(map[catalog].map(e => e.id));
+    for (const ch of Object.values(map.characters)) if (ch[kind + "Id"] && !ids.has(ch[kind + "Id"])) ch[kind + "Id"] = null;
   }
   const charIds = new Set(Object.keys(map.characters));
   map.relationships = map.relationships.filter(r => r && charIds.has(r.fromId) && charIds.has(r.toId));

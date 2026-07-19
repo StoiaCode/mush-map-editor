@@ -21,6 +21,11 @@ export const GROUP_FIELDS = [
   { key:"clan",    label:"Clan" },
   { key:"sect",    label:"Sect" }
 ];
-// Suggestions only (free-text fields, not a hard enum — different chronicles use different lists)
-export const CLAN_SUGGESTIONS = ["Brujah","Gangrel","Malkavian","Nosferatu","Toreador","Tremere","Ventrue","Banu Haqim","Hecata","Lasombra","Ministry","Ravnos","Salubri","Tzimisce","Caitiff","Thin-blood"];
-export const SECT_SUGGESTIONS = ["Camarilla","Anarch","Sabbat","Independent"];
+// Catalog kinds: each is a user-built list of {id, name} entries (S.map.clans/
+// sects/coteries), referenced from characters by id (clanId/sectId/coterieId)
+// instead of free text — see model.js's catalog* helpers.
+export const CATALOG_KINDS = [
+  { kind:"clan",    catalog:"clans",    label:"Clan" },
+  { kind:"sect",    catalog:"sects",    label:"Sect" },
+  { kind:"coterie", catalog:"coteries", label:"Coterie" },
+];

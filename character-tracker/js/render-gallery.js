@@ -1,6 +1,6 @@
 import { S, galleryEl } from "./state.js";
 import { colorOf, escapeHtml, initials } from "./utils.js";
-import { primaryImage } from "./model.js";
+import { primaryImage, catalogName } from "./model.js";
 
 export function renderGallery() {
   const chars = Object.values(S.map.characters);
@@ -21,7 +21,7 @@ export function renderGallery() {
     card.className = "char-card" + (ch.id === S.selectedId ? " selected" : "");
     card.dataset.id = ch.id;
     const img = primaryImage(ch);
-    const badges = [ch.clan, ch.sect, ch.coterie].filter(Boolean);
+    const badges = [catalogName("clan", ch.clanId), catalogName("sect", ch.sectId), catalogName("coterie", ch.coterieId)].filter(Boolean);
     card.innerHTML = `
       <div class="cc-img" style="${img ? `background-image:url('${img.replace(/'/g, "%27")}')` : `background-color:${colorOf(ch)}`}">
         ${img ? "" : `<span class="cc-init">${escapeHtml(initials(ch.name))}</span>`}
