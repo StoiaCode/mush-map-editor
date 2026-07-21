@@ -125,9 +125,13 @@ export function updateUndoButtons() {
 export function loadPrefs() {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) { const p = JSON.parse(raw); if (p.onion) Object.assign(S.onion, p.onion); }
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p.onion) Object.assign(S.onion, p.onion);
+      if (typeof p.inspectorCollapsed === "boolean") S.inspectorCollapsed = p.inspectorCollapsed;
+    }
   } catch (e) { /* ignore */ }
 }
 export function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ onion: S.onion })); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ onion: S.onion, inspectorCollapsed: S.inspectorCollapsed })); } catch (e) { /* ignore */ }
 }

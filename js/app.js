@@ -5,7 +5,7 @@ import { roomsOnLayer } from "./model.js";
 import { renderFlat, updateLayerLabel, resizeCanvas, centerOnRoom, centerCellView } from "./render-flat.js";
 import { resize3d, render3d } from "./render-3d.js";
 import { renderInspector } from "./inspector.js";
-import { updateViewButtons } from "./toolbar.js";
+import { updateViewButtons, applyInspectorCollapsed } from "./toolbar.js";
 
 // Side-effect-only imports: these modules wire up their own event listeners and
 // nothing else imports named bindings from them, so without this line they'd
@@ -43,6 +43,7 @@ window.addEventListener("resize", () => {
 load();
 loadPrefs();
 resetHistory();
+applyInspectorCollapsed();
 resizeCanvas();
 updateViewButtons();
 render();

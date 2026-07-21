@@ -4,8 +4,8 @@ import { clamp, escapeHtml, escapeAttr, areaHex } from "./utils.js";
 import { savePrefs, undo, redo, commit, save } from "./persistence.js";
 import { roomsOnLayer, createTransitLine, deleteTransitLine, moveStation, removeStop, addStubStation, entryId, entryName, isStub, isDual, unbindSecondRoom, createTrait, deleteTrait } from "./model.js";
 import { render } from "./app.js";
-import { stepLayer, zoomAt, centerOnRoom, centerCellView } from "./render-flat.js";
-import { render3d } from "./render-3d.js";
+import { stepLayer, zoomAt, centerOnRoom, centerCellView, resizeCanvas } from "./render-flat.js";
+import { render3d, resize3d } from "./render-3d.js";
 import { buildLegend, buildStats, traitCounts } from "./stats-legend.js";
 import { runSearch, jumpNextMatch, setPathHint } from "./search-path.js";
 
@@ -281,4 +281,17 @@ document.getElementById("zoomReset").onclick = () => {
   const sel = S.selectedId && S.map.rooms[S.selectedId];
   if (sel && sel.z === S.map.currentLayer) centerOnRoom(sel);
   else { const rooms = roomsOnLayer(S.map.currentLayer); rooms.length ? centerOnRoom(rooms[0]) : centerCellView(GRID_N/2, GRID_N/2); }
+};
+
+// ---------- Inspector collapse (frees up screen space in both Flat and 3D views) ----------
+export function applyInspectorCollapsed() {
+  document.getElementById("app").classList.toggle("inspector-collapsed", S.inspectorCollapsed);
+}
+document.getElementById("inspectorToggle").onclick = () => {
+  S.inspectorCollapsed = !S.inspectorCollapsed;
+  applyInspectorCollapsed();
+  savePrefs();
+  // the viewport/3D canvas just changed size via CSS reflow; resync their backing pixel size
+  resizeCanvas();
+  if (S.view === "3d") { resize3d(); render3d(); }
 };

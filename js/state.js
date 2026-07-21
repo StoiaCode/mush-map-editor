@@ -40,6 +40,7 @@ export const S = {
 
   // view-only preferences (persisted separately from the map so they don't bloat exports)
   onion: { below: true, above: false, opacity: 0.30 },
+  inspectorCollapsed: false,
 
   saveTimer: null,
   pickerCtx: null,          // { fromId, toId } while the direction picker is open
