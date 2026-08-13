@@ -54,6 +54,7 @@ export function normalize() {
   if (!Array.isArray(map.transitLines)) map.transitLines = [];
   for (const line of map.transitLines) {
     if (!Array.isArray(line.stations)) line.stations = [];
+    if (typeof line.loop !== "boolean") line.loop = false;
     delete line.forwardLabel; delete line.backwardLabel;   // superseded by per-stop dual bindings
     line.stations = line.stations.map(e => {
       if (typeof e === "string") return map.rooms[e] ? e : null;

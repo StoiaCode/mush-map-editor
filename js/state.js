@@ -20,7 +20,7 @@ export const S = {
   transitActiveLine: null,  // line id that room clicks toggle stations on, while in transit mode
   transitBindPick: null,    // {lineId, stopId} awaiting a map click to bind as that stop's second room
   pathRooms: new Set(),     // rooms on the current shortest-path result (highlighted)
-  pathCanFly: true,         // pathfinder may use flight-only exits
+  pathCanFly: false,        // pathfinder may use flight-only exits
   pathLast: null,           // {startId, endId} of the last computed route, for recompute on toggle
   searchTerm: "",
   searchMatches: [],        // ids of rooms matching the search

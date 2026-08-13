@@ -1,7 +1,7 @@
 import { CELL, LAYER_GAP } from "./constants.js";
 import { S, view3dEl, ctx3d } from "./state.js";
 import { clamp, colorOf, areaHex, hexA } from "./utils.js";
-import { layersPresent, areaCells, selectSingle, clearSelection } from "./model.js";
+import { layersPresent, areaCells, selectSingle, clearSelection, transitEdges } from "./model.js";
 import { render } from "./app.js";
 
 // ---------- 3D view (hand-rolled canvas: rotate → project → painter-sort) ----------
@@ -106,11 +106,10 @@ export function render3d() {
   for (const line of S.map.transitLines) {
     const color = areaHex(line);
     ctx3d.strokeStyle = color; ctx3d.lineWidth = 2; ctx3d.setLineDash([7, 5]);
-    // Stub stops have no room/position — connect the nearest REAL neighbours around any
-    // run of stubs so the line reads as continuous instead of two dead ends.
-    const realIds = line.stations.flatMap(e => typeof e === "string" ? [e] : (e && e.dual ? [e.a, e.b] : []));
-    for (let i = 0; i < realIds.length - 1; i++) {
-      const pa = pr[realIds[i]], pb = pr[realIds[i + 1]];
+    // transitEdges() already skips stubs (connecting the nearest real neighbours around
+    // any run of them) and splits a mid-route dual stop into its two directional edges.
+    for (const [ridA, ridB] of transitEdges(line)) {
+      const pa = pr[ridA], pb = pr[ridB];
       if (!pa || !pb) continue;
       ctx3d.beginPath(); ctx3d.moveTo(pa.sx, pa.sy); ctx3d.lineTo(pb.sx, pb.sy); ctx3d.stroke();
     }

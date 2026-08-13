@@ -79,7 +79,9 @@ export function findPath(startId, endId, allowFly, allowTrain) {
           if (!boardableHere) continue;
           for (let j = 0; j < stations.length; j++) {
             if (j === i) continue;
-            const forward = j > i;
+            // a loop line never travels "backward" — it only ever continues forward,
+            // wrapping past the end back to the start
+            const forward = line.loop ? true : j > i;
             // for a dual stop, you can only depart toward `forward` from the side matching that direction
             if (e && e.dual && (forward ? e.a !== cur : e.b !== cur)) continue;
             const t = resolveStop(stations[j], forward);

@@ -193,7 +193,7 @@ export function mergeImport(data) {
       }
       return { stub: true, id: uid(), name: (e && e.name) || "Unknown Stop" };  // stub: keep, fresh id (avoid collisions on repeat imports)
     }).filter(Boolean);
-    if (stations.length) S.map.transitLines.push({ id: uid(), name: line.name, color: line.color, stations });
+    if (stations.length) S.map.transitLines.push({ id: uid(), name: line.name, color: line.color, stations, loop: !!line.loop });
   }
   S.selection = new Set(newIds);
   S.selectedId = newIds[0];

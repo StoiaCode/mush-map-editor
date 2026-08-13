@@ -1,7 +1,7 @@
 import { CELL, GRID_N, WORLD, SIZE_PX, COMPASS, VEC, OPP } from "./constants.js";
 import { S, viewport, world, svg, gridCanvas, ctx, layerLabel, zoomLabel } from "./state.js";
 import { colorOf, areaHex, hexA, escapeHtml, clamp } from "./utils.js";
-import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor } from "./model.js";
+import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor, transitEdges } from "./model.js";
 import { save } from "./persistence.js";
 import { render } from "./app.js";
 
@@ -203,11 +203,10 @@ export function drawAreaFlat(ar) {
 function drawTransitLinesFlat(z) {
   for (const line of S.map.transitLines) {
     const c = areaHex(line);
-    // Stub stops have no coordinates to draw to/from — connect the nearest REAL
-    // neighbours on either side of any run of stubs, so the line reads as continuous.
-    const realIds = line.stations.flatMap(e => typeof e === "string" ? [e] : (e && e.dual ? [e.a, e.b] : []));
-    for (let i = 0; i < realIds.length - 1; i++) {
-      const a = S.map.rooms[realIds[i]], b = S.map.rooms[realIds[i + 1]];
+    // transitEdges() already skips stubs (connecting the nearest real neighbours around
+    // any run of them) and splits a mid-route dual stop into its two directional edges.
+    for (const [ridA, ridB] of transitEdges(line)) {
+      const a = S.map.rooms[ridA], b = S.map.rooms[ridB];
       if (!a || !b) continue;
       const onA = a.z === z, onB = b.z === z;
       if (onA && onB) {

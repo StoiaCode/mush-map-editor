@@ -170,8 +170,10 @@ export function splitArea(id) {
 // A room is a "station" purely by appearing in some line's `stations` array — nothing
 // is stored on the room itself, so a station can belong to any number of lines.
 // Stations are stored in physical route order (for stop-numbering display); lines are
-// back-and-forth (not terminating), so every station on a line reaches every other —
-// pathfinding treats this as all-pairs reachable, never as "adjacent stops only".
+// back-and-forth (not terminating) by default, or one-directional loops if `line.loop` is
+// set (wraps from the last station back to the first, never travels "backward"). Either
+// way every station on a line reaches every other — pathfinding treats this as all-pairs
+// reachable, never as "adjacent stops only".
 // A stop is one of:
 //   - a room-id string            (an ordinary single-room station)
 //   - { stub:true, id, name }     (a known stop with no mapped room yet)
@@ -201,8 +203,29 @@ export function stationLinesFor(roomId) {
   return S.map.transitLines.filter(line => line.stations.some(e =>
     typeof e === "string" ? e === roomId : (isDual(e) && (e.a === roomId || e.b === roomId))));
 }
+// Resolves a line's `stations` into the room-id pairs to draw as connectors: skips stubs
+// (no room to draw), and splits a pair into up to two edges when the forward-resolved and
+// backward-resolved rooms differ (a dual stop mid-route) — draw a --<>-- lens instead of a
+// single line through the "wrong" middle room. Loop lines have no backward track and add a
+// wraparound edge from the last real entry back to the first.
+export function transitEdges(line) {
+  const real = line.stations.filter(e => typeof e === "string" || isDual(e));
+  const pairs = [];
+  for (let i = 0; i < real.length - 1; i++) pairs.push([real[i], real[i + 1]]);
+  if (line.loop && real.length > 1) pairs.push([real[real.length - 1], real[0]]);
+  const edges = [];
+  for (const [prev, next] of pairs) {
+    const fA = resolveStop(prev, true), fB = resolveStop(next, true);
+    if (fA && fB) edges.push([fA, fB]);
+    if (!line.loop) {
+      const bA = resolveStop(prev, false), bB = resolveStop(next, false);
+      if (bA && bB && !(bA === fA && bB === fB)) edges.push([bA, bB]);
+    }
+  }
+  return edges;
+}
 export function createTransitLine(name, color) {
-  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [] };
+  const line = { id: uid(), name: name || "New Line", color: color || "Teal", stations: [], loop: false };
   S.map.transitLines.push(line);
   return line;
 }

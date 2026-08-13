@@ -145,15 +145,28 @@ export function buildTransitPanel() {
     });
     row.appendChild(swatches);
 
+    const loopRow = document.createElement("label");
+    loopRow.className = "poprow tl-loop-row";
+    loopRow.innerHTML = `<input type="checkbox" class="tl-loop-chk"${line.loop ? " checked" : ""}> 🔁 Loop (one direction, last stop connects back to the first)`;
+    loopRow.querySelector(".tl-loop-chk").onchange = e => { line.loop = e.target.checked; commit(); buildTransitPanel(); render(); };
+    row.appendChild(loopRow);
+
     const stationsList = document.createElement("div");
     stationsList.className = "tl-stations";
     line.stations.forEach((entry, i) => {
       const id = entryId(entry), stub = isStub(entry), dual = isDual(entry);
       const srow = document.createElement("div");
       srow.className = "tl-station" + (stub ? " stub" : "") + (dual ? " dual" : "");
-      srow.innerHTML = `<span class="tl-stopnum">${i + 1}</span>` +
-        `<span class="tl-stopname">${stub ? "❓ " : ""}${escapeHtml(entryName(entry))}` +
-        `${stub ? " <i>(unmapped)</i>" : ""}${dual ? ` <span class="tl-dirhint">→forward / ←backward</span>` : ""}</span>`;
+      let nameHtml;
+      if (dual) {
+        const an = S.map.rooms[entry.a] ? S.map.rooms[entry.a].name : "??";
+        const bn = S.map.rooms[entry.b] ? S.map.rooms[entry.b].name : "??";
+        nameHtml = an === bn ? escapeHtml(an)
+          : `<span class="tl-dirhint">Fwd:</span> <b>${escapeHtml(an)}</b> · <span class="tl-dirhint">Bwd:</span> <b>${escapeHtml(bn)}</b>`;
+      } else {
+        nameHtml = `${stub ? "❓ " : ""}${escapeHtml(entryName(entry))}${stub ? " <i>(unmapped)</i>" : ""}`;
+      }
+      srow.innerHTML = `<span class="tl-stopnum">${i + 1}</span><span class="tl-stopname">${nameHtml}</span>`;
       const up = document.createElement("button"); up.textContent = "▲"; up.disabled = i === 0;
       up.onclick = () => { moveStation(line.id, id, -1); commit(); buildTransitPanel(); render(); };
       const down = document.createElement("button"); down.textContent = "▼"; down.disabled = i === line.stations.length - 1;
