@@ -8,6 +8,7 @@ import { stepLayer, zoomAt, centerOnRoom, centerCellView, resizeCanvas } from ".
 import { render3d, resize3d } from "./render-3d.js";
 import { buildLegend, buildStats, traitCounts } from "./stats-legend.js";
 import { runSearch, jumpNextMatch, setPathHint } from "./search-path.js";
+import { clearImageCache, getImageCacheStats } from "./image-loader.js";
 
 // ---------- Toolbar wiring ----------
 export function updateViewButtons() {
@@ -91,7 +92,32 @@ document.getElementById("statsBtn").onclick = () => {
   const panel = document.getElementById("statsPanel");
   if (panel.style.display === "block") { panel.style.display = "none"; return; }
   buildStats();
+  refreshImageCacheStat();
   positionPopover(panel, document.getElementById("statsBtn"));
+};
+function formatBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
+}
+async function refreshImageCacheStat() {
+  const el = document.getElementById("imageCacheStat");
+  const { count, bytes } = await getImageCacheStats();
+  const text = count ? `🖼 Image cache: ${count} image${count !== 1 ? "s" : ""}, ${formatBytes(bytes)}` : "🖼 Image cache: empty";
+  el.textContent = text;
+  document.getElementById("clearImageCacheBtn").title =
+    (count ? `${count} image${count !== 1 ? "s" : ""} cached (${formatBytes(bytes)}). ` : "Cache is empty. ") +
+    "Wipe the locally cached copies of room images. Use this if a room's image changed at the same URL and the old one is still showing.";
+}
+document.getElementById("clearImageCacheBtn").onclick = async () => {
+  const btn = document.getElementById("clearImageCacheBtn");
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = "Clearing…";
+  await clearImageCache();
+  render();
+  await refreshImageCacheStat();
+  btn.textContent = "Cleared ✓";
+  setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1200);
 };
 document.querySelectorAll(".popclose").forEach(b => {
   b.onclick = () => { document.getElementById(b.dataset.close).style.display = "none"; };

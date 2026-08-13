@@ -4,6 +4,7 @@ import { colorOf, areaHex, hexA, escapeHtml, clamp } from "./utils.js";
 import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor, transitEdges } from "./model.js";
 import { save } from "./persistence.js";
 import { render } from "./app.js";
+import { loadRoomImage } from "./image-loader.js";
 
 // ---------- Layer navigation ----------
 export function setLayer(z) {
@@ -262,10 +263,16 @@ export function makeRoomEl(r, ghost) {
   el.style.width = px + "px"; el.style.height = px + "px";
   el.style.backgroundColor = colorOf(r);
   if (!ghost && r.imageUrl) {
-    // image sits over the color fallback; if it 404s/is slow, the color still shows (no JS needed)
-    el.style.backgroundImage = `url("${r.imageUrl.replace(/"/g, '%22')}")`;
-    el.style.backgroundSize = "cover"; el.style.backgroundPosition = "center";
+    // image sits over the color fallback; if it 404s/is slow/queued, the color still shows.
+    // Staggered + cached through image-loader.js rather than set directly, so a layer with
+    // hundreds of imaged rooms doesn't fire that many requests at the image host at once.
     el.classList.add("has-image");
+    const url = r.imageUrl;
+    loadRoomImage(url).then(src => {
+      if (r.imageUrl !== url) return;   // room's image changed again before this one loaded
+      el.style.backgroundImage = `url("${src.replace(/"/g, '%22')}")`;
+      el.style.backgroundSize = "cover"; el.style.backgroundPosition = "center";
+    });
   }
   el.style.fontSize = (r.size === "small" ? 9 : r.size === "large" ? 12 : 10) + "px";
   if (ghost) el.style.opacity = S.onion.opacity;
