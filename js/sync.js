@@ -1,7 +1,7 @@
 import { S } from "./state.js";
 import { escapeHtml } from "./utils.js";
 import { positionPopover } from "./toolbar.js";
-import { stageImport } from "./export-import.js";
+import { enterPreview } from "./preview.js";
 
 // Relative by default (reverse-proxied alongside the frontend in production). Can be
 // overridden (e.g. localStorage.setItem("mushSyncApiBase", "http://host:port/api")) for
@@ -61,8 +61,12 @@ document.getElementById("syncUploadBtn").onclick = async () => {
     const id = result.id;
     setStatus("Uploaded.", "ok");
     document.getElementById("syncUploadResult").innerHTML =
-      `<div class="synccode"><span class="code">${escapeHtml(id)}</span><button id="syncCopyBtn">📋 Copy</button></div>`;
+      `<div class="synccode"><span class="code">${escapeHtml(id)}</span>` +
+      `<button id="syncCopyBtn">📋 Copy code</button>` +
+      `<button id="syncCopyLinkBtn">🔗 Copy link</button></div>`;
     document.getElementById("syncCopyBtn").onclick = () => navigator.clipboard.writeText(id);
+    document.getElementById("syncCopyLinkBtn").onclick = () =>
+      navigator.clipboard.writeText(`${location.origin}${location.pathname}?sync=${id}`);
     codeInput.value = id;
   } catch (e) { setStatus(e.message, "err"); }
 };
@@ -73,11 +77,31 @@ document.getElementById("syncLoadBtn").onclick = async () => {
   setStatus("Loading…");
   try {
     const data = await apiCall("GET", code);
-    stageImport(data, document.getElementById("syncBtn"));
+    enterPreview(data);
     document.getElementById("syncPanel").style.display = "none";
     setStatus("");
   } catch (e) { setStatus(e.message, "err"); }
 };
+
+// ---------- URL sharing (?sync=CODE) ----------
+// One-shot: the param is stripped as soon as it's consumed, so a later refresh just
+// shows the user's own map rather than re-fetching/re-prompting.
+export async function applyUrlSync() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get("sync");
+  if (!code) return;
+  if (!validCode(code)) return;   // garbled/hand-typed link - ignore rather than error
+  params.delete("sync");
+  const search = params.toString();
+  history.replaceState(null, "", location.pathname + (search ? "?" + search : ""));
+  try {
+    const data = await apiCall("GET", code);
+    enterPreview(data);
+  } catch (e) {
+    positionPopover(document.getElementById("syncPanel"), document.getElementById("syncBtn"));
+    setStatus(e.message, "err");
+  }
+}
 
 document.getElementById("syncDeleteBtn").onclick = async () => {
   const code = document.getElementById("syncDeleteCode").value.trim();

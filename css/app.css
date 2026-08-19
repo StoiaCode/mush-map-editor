@@ -193,7 +193,7 @@ select { cursor: pointer; }
 .statrow { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; }
 .statrow .val { color: var(--muted); font-variant-numeric: tabular-nums; }
 .statrow .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
-#exportPanel, #importPanel, #syncPanel { max-width: 260px; max-height: 80vh; overflow-y: auto; }
+#exportPanel, #syncPanel { max-width: 260px; max-height: 80vh; overflow-y: auto; }
 .syncwarn { background: rgba(226,85,85,.12); border: 1px solid rgba(226,85,85,.4); border-radius: 6px;
   padding: 7px 9px; font-size: 11px; line-height: 1.5; color: var(--text); margin-bottom: 10px; }
 .syncsec { margin-bottom: 10px; }
@@ -211,7 +211,15 @@ select { cursor: pointer; }
 .checklist label { display: flex; align-items: center; gap: 7px; padding: 2px 0; font-size: 12px; cursor: pointer; }
 .checklist .cnt { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .expcount { font-size: 12px; color: var(--accent); font-weight: 700; margin: 6px 0 8px; }
-#importSummary { font-size: 12px; margin-bottom: 10px; line-height: 1.5; }
+/* Preview banner (file import / sync-code load / URL share): S.map briefly becomes a
+   disposable sandbox showing the incoming map, and this bar is the only way out. */
+#previewBanner {
+  display: none; align-items: center; gap: 10px;
+  padding: 8px 12px; background: rgba(241,200,74,.14);
+  border-bottom: 1px solid rgba(241,200,74,.5); flex-wrap: wrap;
+}
+#previewBanner .spacer { flex: 1; }
+#previewSummary { font-size: 12px; line-height: 1.4; }
 /* marquee box-select rectangle (screen space) */
 #marquee {
   position: fixed; z-index: 80; display: none; pointer-events: none;
