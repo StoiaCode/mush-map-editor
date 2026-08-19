@@ -45,6 +45,8 @@ export const S = {
   saveTimer: null,
   pickerCtx: null,          // { fromId, toId } while the direction picker is open
   pendingImport: null,      // parsed map data awaiting a replace/add choice
+  previewMode: false,       // true while S.map is a disposable sandbox showing pendingImport
+  previewBackup: null,      // { map, history, histIdx, selection state, viewport } to restore on exit
 };
 
 // ---------- DOM ----------

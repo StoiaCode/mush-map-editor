@@ -8,6 +8,7 @@ import { render } from "./app.js";
 export function defaultMap() { return { version: 2, rooms: {}, areas: [], transitLines: [], traits: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
 
 export function save() {
+  if (S.previewMode) return;   // sandboxed preview map must never touch the real save slot
   if (S.saveTimer) clearTimeout(S.saveTimer);
   saveStatus.textContent = "saving…";
   S.saveTimer = setTimeout(() => {

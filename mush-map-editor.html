@@ -79,6 +79,14 @@
     <button id="newMapBtn" class="danger">New</button>
   </div>
 
+  <div id="previewBanner">
+    <span id="previewSummary"></span>
+    <span class="spacer"></span>
+    <button id="previewMerge" class="primary">➕ Merge into my map</button>
+    <button id="previewReplace" class="danger">⚠ Replace my map</button>
+    <button id="previewDiscard">✕ Discard</button>
+  </div>
+
   <div id="main">
     <div id="viewport">
       <canvas id="gridcanvas"></canvas>
@@ -136,13 +144,6 @@
   </div>
   <div class="expcount" id="expCount"></div>
   <button id="expDo" class="primary" style="width:100%;">⬇ Export selection</button>
-</div>
-
-<div id="importPanel" class="popover">
-  <div class="pop-hdr">Import map <button class="popclose" data-close="importPanel">✕</button></div>
-  <div id="importSummary"></div>
-  <button id="importAdd" class="primary" style="width:100%;margin-bottom:6px;">➕ Add to current map</button>
-  <button id="importReplace" class="danger" style="width:100%;">⚠ Replace everything</button>
 </div>
 
 <div id="syncPanel" class="popover">

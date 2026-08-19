@@ -2,10 +2,11 @@ import { DIRS, GRID_N } from "./constants.js";
 import { S } from "./state.js";
 import { uid, clamp, escapeHtml } from "./utils.js";
 import { roomInArea, roomsInArea, layersPresent, roomsOnLayer, clearSelection } from "./model.js";
-import { commit, normalize, resetHistory, save, defaultMap } from "./persistence.js";
-import { render, fitInitial } from "./app.js";
+import { commit, resetHistory, save, defaultMap } from "./persistence.js";
+import { render } from "./app.js";
 import { centerOnRoom, centerCellView } from "./render-flat.js";
 import { positionPopover } from "./toolbar.js";
+import { enterPreview } from "./preview.js";
 
 // ---------- Export (filtered / partial) ----------
 export function downloadJSON(obj, filename) {
@@ -100,45 +101,18 @@ document.getElementById("exportBtn").onclick = () => {
 document.getElementById("expDo").onclick = doExport;
 
 // ---------- Import (replace or additive) ----------
-// Shared by file-based import and sync-code load (js/sync.js): validates, stashes the
-// parsed map as the pending import, fills the summary line, and opens the panel that
-// holds the Add/Replace choice.
-export function stageImport(data, anchorBtn) {
-  if (!data || !data.rooms) throw new Error("Not a valid map (no rooms).");
-  S.pendingImport = data;
-  const m = data.meta || {};
-  const roomCount = Object.keys(data.rooms).length;
-  document.getElementById("importSummary").innerHTML =
-    (m.title ? `<b>${escapeHtml(m.title)}</b><br>` : "") +
-    (m.author ? `by ${escapeHtml(m.author)}<br>` : "") +
-    `${roomCount} room${roomCount !== 1 ? "s" : ""}` + (m.date ? ` · ${escapeHtml(m.date)}` : "") +
-    (data.partial ? ` · partial map` : "");
-  const panel = document.getElementById("importPanel");
-  positionPopover(panel, anchorBtn);
-}
+// File-based import and sync-code load (js/sync.js) both hand the parsed map to
+// enterPreview() (js/preview.js), which renders it on the canvas for a real look
+// before the user picks Merge/Replace/Discard.
 document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
 document.getElementById("importFile").onchange = e => {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try { stageImport(JSON.parse(reader.result), document.getElementById("importBtn")); }
+    try { enterPreview(JSON.parse(reader.result)); }
     catch (err) { alert("Import failed: " + err.message); }
   };
   reader.readAsText(file); e.target.value = "";
-};
-document.getElementById("importReplace").onclick = () => {
-  if (!S.pendingImport) return;
-  if (!confirm("Replace the current map entirely?")) return;
-  S.map = S.pendingImport; normalize(); clearSelection();
-  resetHistory(); save(); render(); fitInitial();
-  S.pendingImport = null;
-  document.getElementById("importPanel").style.display = "none";
-};
-document.getElementById("importAdd").onclick = () => {
-  if (!S.pendingImport) return;
-  mergeImport(S.pendingImport);
-  S.pendingImport = null;
-  document.getElementById("importPanel").style.display = "none";
 };
 export function mergeImport(data) {
   const src = Object.values(data.rooms || {});

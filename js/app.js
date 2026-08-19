@@ -11,8 +11,9 @@ import { updateViewButtons, applyInspectorCollapsed } from "./toolbar.js";
 // nothing else imports named bindings from them, so without this line they'd
 // never load and the app would have no pointer/keyboard/export/import behaviour.
 import "./interactions.js";
+import "./preview.js";
 import "./export-import.js";
-import "./sync.js";
+import { applyUrlSync } from "./sync.js";
 
 // ---------- Render dispatcher ----------
 // Central so every other module can trigger a redraw via one import, instead of
@@ -48,3 +49,4 @@ resizeCanvas();
 updateViewButtons();
 render();
 fitInitial();
+applyUrlSync();
