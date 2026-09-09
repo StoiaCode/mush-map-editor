@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 export const CELL = 90;
-export const GRID_N = 100;                 // 100 x 100 cells per layer
+export const GRID_N = 1000;                // 1000 x 1000 cells per layer
 export const WORLD = CELL * GRID_N;
 export const LAYER_GAP = 140;              // vertical spacing between layers in the 3D view
 export const SIZE_PX = { small: 46, medium: 62, large: 82 };
