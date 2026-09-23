@@ -2,7 +2,7 @@ import { NODE_SIZE, CLICK_THRESH } from "./constants.js";
 import { S, viewport, world, svg, edgePicker } from "./state.js";
 import { clamp, escapeHtml } from "./utils.js";
 import {
-  createCharacter, deleteCharacter, selectCharacter, selectAnnotation, clearSelection,
+  createCharacter, deleteCharacter, selectCharacter, toggleCharacterSel, selectAnnotation, clearSelection,
   createAnnotation, deleteAnnotation, createRelationship, updateRelationshipLabel, deleteRelationship,
   impliedRelationship,
 } from "./model.js";
@@ -62,9 +62,18 @@ viewport.addEventListener("mousedown", e => {
       else { setPendingLink(null); }
       e.stopPropagation(); e.preventDefault(); return;
     }
-    selectCharacter(id); render();
-    const ch = S.map.characters[id];
-    S.drag = { type:"node-move", id, x0:e.clientX, y0:e.clientY, sx:ch.x, sy:ch.y, moved:false };
+    // Ctrl/Cmd-click = toggle this character in the multi-selection (no drag)
+    if (e.ctrlKey || e.metaKey) {
+      toggleCharacterSel(id); render();
+      e.preventDefault(); return;
+    }
+    // Plain click: if part of a multi-selection, drag the whole group; else single-select.
+    if (!S.selection.has(id)) selectCharacter(id);
+    render();
+    const ids = (S.selection.size > 1 && S.selection.has(id)) ? [...S.selection] : [id];
+    const starts = {};
+    for (const i of ids) { const c = S.map.characters[i]; starts[i] = { x: c.x, y: c.y }; }
+    S.drag = { type:"node-move", ids, clickId:id, starts, x0:e.clientX, y0:e.clientY, moved:false };
     e.preventDefault(); return;
   }
 
@@ -73,6 +82,15 @@ viewport.addEventListener("mousedown", e => {
     S.drag = { type:"circle-draw", x0:e.clientX, y0:e.clientY };
     S.circleDraft = { x0:w.x, y0:w.y, x1:w.x, y1:w.y };
     renderWeb();
+    e.preventDefault(); return;
+  }
+
+  // Shift-drag on empty space = marquee box-select; otherwise pan.
+  if (e.shiftKey) {
+    S.drag = { type:"marquee", x0:e.clientX, y0:e.clientY };
+    const m = document.getElementById("marquee");
+    m.style.display = "block"; m.style.left = e.clientX + "px"; m.style.top = e.clientY + "px";
+    m.style.width = "0px"; m.style.height = "0px";
     e.preventDefault(); return;
   }
 
@@ -100,12 +118,23 @@ window.addEventListener("mousemove", e => {
     world.style.transform = `translate(${S.panX}px, ${S.panY}px) scale(${S.scale})`;
   } else if (drag.type === "node-move") {
     if (Math.abs(dx) > CLICK_THRESH || Math.abs(dy) > CLICK_THRESH) drag.moved = true;
-    const ch = S.map.characters[drag.id];
-    if (ch) { ch.x = drag.sx + dx / S.scale; ch.y = drag.sy + dy / S.scale; renderWeb(); }
+    const wdx = dx / S.scale, wdy = dy / S.scale;
+    for (const id of drag.ids) {
+      const ch = S.map.characters[id];
+      const s = drag.starts[id];
+      if (ch && s) { ch.x = s.x + wdx; ch.y = s.y + wdy; }
+    }
+    renderWeb();
   } else if (drag.type === "circle-draw") {
     const w = screenToWorld(e.clientX, e.clientY);
     S.circleDraft.x1 = w.x; S.circleDraft.y1 = w.y;
     renderWeb();
+  } else if (drag.type === "marquee") {
+    const x = Math.min(e.clientX, drag.x0), y = Math.min(e.clientY, drag.y0);
+    const m = document.getElementById("marquee");
+    m.style.left = x + "px"; m.style.top = y + "px";
+    m.style.width = Math.abs(e.clientX - drag.x0) + "px";
+    m.style.height = Math.abs(e.clientY - drag.y0) + "px";
   }
 });
 
@@ -116,12 +145,31 @@ window.addEventListener("mouseup", e => {
   if (d.type === "pan") {
     if (!d.moved) {
       if (S.linkMode) { if (S.pendingLink) setPendingLink(null); return; }
-      if (S.selectedId || S.selectedAnnotationId) { clearSelection(); render(); }
+      if (S.selection.size || S.selectedId || S.selectedAnnotationId) { clearSelection(); render(); }
     }
     return;
   }
+  if (d.type === "marquee") {
+    document.getElementById("marquee").style.display = "none";
+    const a = screenToWorld(Math.min(e.clientX, d.x0), Math.min(e.clientY, d.y0));
+    const b = screenToWorld(Math.max(e.clientX, d.x0), Math.max(e.clientY, d.y0));
+    const hits = Object.values(S.map.characters).filter(ch => {
+      const c = nodeCenter(ch);
+      return c.x >= a.x && c.x <= b.x && c.y >= a.y && c.y <= b.y;
+    });
+    S.selection = new Set(hits.map(ch => ch.id));
+    S.selectedId = hits.length ? hits[hits.length - 1].id : null;
+    S.selectedAnnotationId = null;
+    render(); return;
+  }
   if (d.type === "node-move") {
-    if (d.moved) commit(); else render();
+    if (!d.moved) {
+      // plain click without dragging: collapse a multi-selection to just the clicked character
+      if (S.selection.size > 1) { selectCharacter(d.clickId); render(); }
+      else render();
+      return;
+    }
+    commit();
     return;
   }
   if (d.type === "circle-draw") {
@@ -223,6 +271,13 @@ window.addEventListener("keydown", e => {
     if (S.selectedAnnotationId) {
       const ann = S.map.annotations.find(a => a.id === S.selectedAnnotationId);
       if (ann && confirm(`Delete the "${ann.name}" group circle?`)) { deleteAnnotation(ann.id); commit(); render(); }
+      e.preventDefault(); return;
+    }
+    if (S.selection.size > 1) {
+      if (confirm(`Delete ${S.selection.size} selected characters?`)) {
+        for (const id of [...S.selection]) deleteCharacter(id);
+        clearSelection(); commit(); render();
+      }
       e.preventDefault(); return;
     }
     if (S.selectedId) {

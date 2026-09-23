@@ -12,7 +12,8 @@ export const S = {
   view: "web",                // "web" | "gallery" | "groups"
   groupField: "coterie",       // grouping key for the Groups view
 
-  selectedId: null,            // selected character id
+  selectedId: null,            // selected character id (primary, when a multi-selection is active)
+  selection: new Set(),         // multi-selection of character ids
   selectedAnnotationId: null,  // selected freeform-circle id
   fullProfileOpen: false,      // whether the big profile panel is open
 

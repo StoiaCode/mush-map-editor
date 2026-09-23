@@ -76,6 +76,7 @@ export function redo() { if (S.histIdx < S.history.length - 1) { S.histIdx++; S.
 function cloneFrom(idx) { return JSON.parse(JSON.stringify(S.history[idx])); }
 function afterRestore() {
   const map = S.map;
+  S.selection = new Set([...S.selection].filter(id => map.characters[id]));
   if (S.selectedId && !map.characters[S.selectedId]) S.selectedId = null;
   if (S.selectedAnnotationId && !map.annotations.some(a => a.id === S.selectedAnnotationId)) S.selectedAnnotationId = null;
   S.pendingLink = null;

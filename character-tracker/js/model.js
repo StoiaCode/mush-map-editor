@@ -5,9 +5,23 @@ import { CATALOG_KINDS } from "./constants.js";
 const CATALOG_KEY = Object.fromEntries(CATALOG_KINDS.map(k => [k.kind, k.catalog]));
 
 // ---------- Selection ----------
-export function selectCharacter(id) { S.selectedId = id || null; S.selectedAnnotationId = null; }
-export function selectAnnotation(id) { S.selectedAnnotationId = id || null; S.selectedId = null; }
-export function clearSelection() { S.selectedId = null; S.selectedAnnotationId = null; S.fullProfileOpen = false; }
+export function selectCharacter(id) {
+  S.selectedId = id || null;
+  S.selection = new Set(id ? [id] : []);
+  S.selectedAnnotationId = null;
+}
+export function toggleCharacterSel(id) {
+  if (S.selection.has(id)) {
+    S.selection.delete(id);
+    if (S.selectedId === id) S.selectedId = S.selection.size ? [...S.selection].pop() : null;
+  } else {
+    S.selection.add(id);
+    S.selectedId = id;
+  }
+  S.selectedAnnotationId = null;
+}
+export function selectAnnotation(id) { S.selectedAnnotationId = id || null; S.selectedId = null; S.selection = new Set(); }
+export function clearSelection() { S.selectedId = null; S.selection = new Set(); S.selectedAnnotationId = null; S.fullProfileOpen = false; }
 
 // ---------- Character CRUD ----------
 export function createCharacter(x, y, name) {
@@ -23,7 +37,8 @@ export function createCharacter(x, y, name) {
 export function deleteCharacter(id) {
   delete S.map.characters[id];
   S.map.relationships = S.map.relationships.filter(r => r.fromId !== id && r.toId !== id);
-  if (S.selectedId === id) S.selectedId = null;
+  S.selection.delete(id);
+  if (S.selectedId === id) S.selectedId = S.selection.size ? [...S.selection].pop() : null;
 }
 export function addTag(ch, tag) {
   tag = String(tag || "").trim();

@@ -57,7 +57,7 @@ export function renderWeb() {
 }
 
 function makeNodeEl(ch) {
-  const sel = ch.id === S.selectedId;
+  const sel = ch.id === S.selectedId || S.selection.has(ch.id);
   const el = document.createElement("div");
   el.className = "node"
     + (sel ? " selected" : "")

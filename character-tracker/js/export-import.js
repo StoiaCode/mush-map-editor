@@ -106,6 +106,7 @@ export function mergeImport(data) {
       cx: (ann.cx || 0) + dx, cy: ann.cy || 0, rx: ann.rx || 80, ry: ann.ry || 80 });
   }
   S.selectedId = newIds[0];
+  S.selection = new Set([newIds[0]]);
   commit(); render(); centerOnPoint(S.map.characters[newIds[0]].x, S.map.characters[newIds[0]].y);
 }
 document.getElementById("newMapBtn").onclick = () => {

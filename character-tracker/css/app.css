@@ -57,6 +57,11 @@ select { cursor: pointer; }
 #viewport.circlemode { cursor: crosshair; }
 #world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 #svglayer { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+/* marquee box-select rectangle (screen space) */
+#marquee {
+  position: fixed; z-index: 80; display: none; pointer-events: none;
+  border: 1px solid var(--accent); background: rgba(91,157,255,.15);
+}
 
 /* Character node (fluid canvas — no grid, freely positioned) */
 .node {

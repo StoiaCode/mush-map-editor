@@ -23,11 +23,40 @@ export function renderInspector() {
         <p><b>Double-click empty space</b> to add a character.<br>
         <b>Click a node</b> to select & edit it.<br>
         <b>Drag a node</b> to reposition it anywhere.</p>
+        <p class="hint"><b>Ctrl+click</b> nodes or <b>Shift-drag</b> empty space to multi-select, then move / recolor / delete them together.</p>
         <p class="hint"><b>🔗 Link mode</b>: click one character, then another, to draw a labeled relationship between them. Click a relationship line to relabel or remove it.</p>
         <p class="hint">Characters who share a coterie are automatically bonded as allies (shown as a faint dashed line) — no need to link them by hand. Click that line, or edit its label in the full profile, to give it something more specific.</p>
         <p class="hint"><b>◯ Circle mode</b>: drag across empty space to draw a freeform group — good for coteries, hangout spots, factions, anything you want to visually cluster.</p>
         <p class="hint"><b>Ctrl+Z / Ctrl+Y</b> undo / redo · <b>Del</b> delete selection · <b>Esc</b> deselect.</p>
       </div>`;
+    closeFullProfile();
+    return;
+  }
+
+  // Multiple characters selected → bulk-edit panel
+  if (S.selection.size > 1) {
+    inspector.innerHTML =
+      `<h3>${S.selection.size} characters selected</h3>` +
+      `<div class="insec"><label class="seclabel">Set colour tag (all)</label><div class="swatches" id="bulk_color"></div></div>` +
+      `<div class="insec">
+        <button id="bulk_clear" style="width:100%;margin-bottom:6px;">Clear selection</button>
+        <button class="danger" id="bulk_del" style="width:100%">Delete ${S.selection.size} characters</button>
+      </div>` +
+      `<div class="empty-note hint">Drag any selected node to move them together. Ctrl+click adds/removes; Shift-drag box-selects.</div>`;
+    const bsw = document.getElementById("bulk_color");
+    PALETTE.forEach(p => {
+      const s = document.createElement("div");
+      s.className = "swatch"; s.style.background = p.c; s.title = p.name;
+      s.onclick = () => { for (const id of S.selection) S.map.characters[id].color = p.name; commit(); render(); };
+      bsw.appendChild(s);
+    });
+    document.getElementById("bulk_clear").onclick = () => { clearSelection(); render(); };
+    document.getElementById("bulk_del").onclick = () => {
+      if (confirm(`Delete ${S.selection.size} selected characters?`)) {
+        for (const id of [...S.selection]) deleteCharacter(id);
+        clearSelection(); commit(); render();
+      }
+    };
     closeFullProfile();
     return;
   }
