@@ -76,7 +76,7 @@ export function renderInspector() {
         <b>🔗 Link mode</b>: click a room, switch layers if needed, then click the target — links across layers / gaps.</p>
         <p class="hint"><b>Ctrl+click</b> rooms or <b>Shift-drag</b> empty space to multi-select (add <b>Alt</b> to box-select across <i>all</i> layers), then move / recolor / delete them together.</p>
         <p class="hint">With a room selected — carve with the <b>Q W E / A S D / Z X C</b> rose: edges are compass (<b>X</b> = south), centre <b>S</b> = up a layer, <b>Shift+S</b> = down · <b>Del</b> delete · <b>Esc</b> deselect.</p>
-        <p class="hint"><b>Ctrl+Z / Ctrl+Y</b> undo / redo · the <b>👁 Onion</b> menu controls which neighbour layers ghost through.</p>
+        <p class="hint"><b>Ctrl+Z / Ctrl+Y</b> undo / redo · <b>👁 View ▾ → Onion-skin</b> controls which neighbour layers ghost through.</p>
         <p class="hint" style="margin-top:14px;opacity:.7;">© 2026 Stoia · MIT Licensed · <a href="https://github.com/StoiaCode/mush-map-editor" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a></p>
       </div>`;
     return;

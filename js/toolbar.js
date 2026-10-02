@@ -64,8 +64,34 @@ document.getElementById("searchBox").addEventListener("keydown", e => {
 document.getElementById("undoBtn").onclick = undo;
 document.getElementById("redoBtn").onclick = redo;
 
+// ---------- Dropdown menus (View ▾, Map ▾) ----------
+// The menu items keep their original ids, so the handlers below (and in export-import.js /
+// sync.js / changelog.js) work unchanged; picking an item just also closes its menu.
+function closeMenus(except) {
+  document.querySelectorAll(".menu.open").forEach(m => {
+    if (m === except) return;
+    m.classList.remove("open");
+    document.getElementById(m.dataset.anchor).classList.remove("active");
+  });
+}
+document.querySelectorAll(".menu").forEach(menu => {
+  const trigger = document.getElementById(menu.dataset.anchor);
+  trigger.onclick = () => {
+    const open = !menu.classList.contains("open");
+    closeMenus(menu);
+    menu.classList.toggle("open", open);
+    trigger.classList.toggle("active", open);
+  };
+  menu.addEventListener("click", e => { if (e.target.closest("button")) closeMenus(); });   // runs after the item's own onclick
+});
+document.addEventListener("mousedown", e => { if (!e.target.closest(".menuwrap")) closeMenus(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeMenus(); });
+
 // ---------- Legend / onion / stats / export / import popovers ----------
 export function positionPopover(panel, btn) {
+  // a button inside a dropdown menu is hidden once the menu closes, so anchor to the menu's trigger
+  const menu = btn.closest(".menu");
+  if (menu) btn = document.getElementById(menu.dataset.anchor);
   const r = btn.getBoundingClientRect();
   panel.style.display = "block";
   const w = panel.offsetWidth, h = panel.offsetHeight;

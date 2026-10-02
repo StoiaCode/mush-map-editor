@@ -131,7 +131,7 @@ export function updateLocationUI() {
   }
   const name = escapeHtml(spaceName(sp));
   crumb.innerHTML = `<button class="crumb link" data-leave-space title="Back to the main map, at this space's door">🗺 ${MAIN_NAME}</button>` +
-    `<span class="crumbsep">›</span><span class="crumb here" style="color:${c}">⧉ ${name}</span>`;
+    `<span class="crumbsep">›</span><span class="crumb here" style="color:${c}" title="${name}">⧉ ${name}</span>`;
   tag.style.display = "";
   tag.innerHTML = `<span class="tagname">⧉ ${name}</span><span class="taglayer">${escapeHtml(layerName(S.map.currentLayer, sp))}</span>` +
     `<button data-leave-space title="Back to the main map, at this space's door">↩ ${MAIN_NAME}</button>`;

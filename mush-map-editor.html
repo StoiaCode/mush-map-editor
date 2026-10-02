@@ -52,34 +52,44 @@
       <button class="iconbtn" id="redoBtn" title="Redo (Ctrl+Y)">↷</button>
     </span>
 
+    <span class="seg" id="modeseg" title="Editing modes (one at a time)">
+      <button id="linkBtn" title="Link mode: click a room, change layers if needed, then click the target. (Shift-drag links rooms on the same layer.)">🔗 Link</button>
+      <button id="pathBtn" title="Pathfinder: click the start room, then the destination. Shows the shortest route as directions.">🧭 Path</button>
+      <button id="areaBtn" title="Area mode: drag empty space to draw a zone rectangle. Spans all layers. Click an area to move/resize/edit it.">▭ Area</button>
+      <button id="transitBtn" title="Transit mode: pick or create a line in the panel, then click rooms to add/remove them as stations.">🚆 Transit</button>
+    </span>
+
     <button id="spacesBtn" title="Spaces: separate pocket maps (a building's upper floors, a sewer…) hanging off doors on the main map. Lists every space, its doors, and lets you enter it.">⧉ Spaces</button>
-    <button id="linkBtn" title="Link mode: click a room, change layers if needed, then click the target. (Shift-drag links rooms on the same layer.)">🔗 Link</button>
-    <button id="pathBtn" title="Pathfinder: click the start room, then the destination. Shows the shortest route as directions.">🧭 Path</button>
-    <button id="areaBtn" title="Area mode: drag empty space to draw a zone rectangle. Spans all layers. Click an area to move/resize/edit it.">▭ Area</button>
-    <button id="transitBtn" title="Transit mode: pick or create a line in the panel, then click rooms to add/remove them as stations.">🚆 Transit</button>
     <button id="traitsBtn" title="Traits: define emoji markers (e.g. scavenge spots, hazards) and assign them to rooms from the inspector.">✨ Traits</button>
-    <button id="legendBtn" title="Color-tag legend: name what each colour means.">🏷 Legend</button>
-    <button id="onionBtn" title="Onion-skin: show neighbour layers ghosted through.">👁 Onion</button>
-    <button id="statsBtn" title="Map statistics: room counts by layer, colour and area.">📊 Stats</button>
+
+    <span class="menuwrap">
+      <button id="viewMenuBtn" class="menubtn" aria-haspopup="true" title="Legend, onion-skin and stats">👁 View ▾</button>
+      <div class="menu" id="viewMenu" data-anchor="viewMenuBtn" role="menu">
+        <button id="legendBtn" role="menuitem" title="Color-tag legend: name what each colour means.">🏷 Legend</button>
+        <button id="onionBtn" role="menuitem" title="Onion-skin: show neighbour layers ghosted through.">👁 Onion-skin</button>
+        <button id="statsBtn" role="menuitem" title="Map statistics: room counts by layer, colour and area.">📊 Stats</button>
+      </div>
+    </span>
+
     <input type="text" id="searchBox" placeholder="🔍 Search rooms…">
     <span id="searchInfo" class="statuschip"></span>
     <span id="linkHint" class="statuschip" style="display:none;color:var(--good)"></span>
 
-    <span id="zoomctl">
-      <button class="iconbtn" id="zoomOut">−</button>
-      <span class="statuschip" id="zoomLabel">100%</span>
-      <button class="iconbtn" id="zoomIn">+</button>
-      <button id="zoomReset" title="Reset view">Reset</button>
-    </span>
-
     <span class="spacer"></span>
     <span class="statuschip" id="saveStatus"></span>
-    <button id="whatsNewBtn" title="What's new in the editor">📰 What's new</button>
-    <button id="exportBtn">⬇ Export</button>
-    <button id="importBtn">⬆ Import</button>
+    <span class="menuwrap">
+      <button id="mapMenuBtn" class="menubtn" aria-haspopup="true" title="Export, import, sync, new map, what's new">☰ Map ▾</button>
+      <div class="menu right" id="mapMenu" data-anchor="mapMenuBtn" role="menu">
+        <button id="exportBtn" role="menuitem">⬇ Export…</button>
+        <button id="importBtn" role="menuitem">⬆ Import…</button>
+        <button id="syncBtn" role="menuitem" title="Sync: upload/load/delete this map on the server via a short code.">☁ Sync…</button>
+        <hr>
+        <button id="whatsNewBtn" role="menuitem" title="What's new in the editor">📰 What's new</button>
+        <hr>
+        <button id="newMapBtn" role="menuitem" class="danger">New map…</button>
+      </div>
+    </span>
     <input type="file" id="importFile" accept="application/json" style="display:none">
-    <button id="syncBtn" title="Sync: upload/load/delete this map on the server via a short code.">☁ Sync</button>
-    <button id="newMapBtn" class="danger">New</button>
   </div>
 
   <div id="previewBanner">
@@ -104,6 +114,12 @@
     <canvas id="canvas3d"></canvas>
 
     <div id="spaceTag" style="display:none"></div>
+    <span id="zoomctl">
+      <button class="iconbtn" id="zoomOut" title="Zoom out">−</button>
+      <span class="statuschip" id="zoomLabel">100%</span>
+      <button class="iconbtn" id="zoomIn" title="Zoom in">+</button>
+      <button id="zoomReset" title="Reset view">Reset</button>
+    </span>
     <div id="toast"></div>
 
     <button id="inspectorToggle" title="Collapse/expand the inspector panel"></button>

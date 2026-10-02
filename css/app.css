@@ -21,7 +21,7 @@ html, body {
 
 /* Top bar */
 #topbar {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px;
   padding: 8px 12px; background: var(--panel);
   border-bottom: 1px solid var(--line); flex-wrap: wrap;
 }
@@ -292,7 +292,7 @@ select { cursor: pointer; }
 .traitrow .cnt { color: var(--muted); min-width: 20px; text-align: right; font-variant-numeric: tabular-nums; }
 .traitrow button { padding: 3px 7px; font-size: 11px; }
 
-#searchBox { width: 150px; }
+#searchBox { width: 130px; }
 #pathResult {
   position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -429,3 +429,24 @@ select { cursor: pointer; }
 #changelogBody ul { margin: 4px 0 8px; padding-left: 20px; }
 #changelogBody .cl-entry + .cl-entry { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
 #changelogModal .cl-ok { align-self: flex-end; margin-top: 10px; padding: 6px 18px; background: var(--accent2); border-color: var(--accent); color: #fff; font-weight: 700; }
+/* Toolbar dropdown menus */
+.menuwrap { position: relative; display: inline-flex; }
+.menu {
+  display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 120; min-width: 170px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.6); flex-direction: column; gap: 2px;
+}
+.menu.right { left: auto; right: 0; }
+.menu.open { display: flex; }
+.menu button { text-align: left; border-color: transparent; background: transparent; padding: 6px 10px; white-space: nowrap; }
+.menu button:hover { background: var(--panel2); border-color: var(--line); }
+.menu button.danger:hover { background: var(--danger); color: #fff; }
+.menu hr { border: none; border-top: 1px solid var(--line); margin: 3px 2px; }
+/* Zoom: floats over the map's bottom-left corner instead of taking toolbar space */
+#zoomctl {
+  position: absolute; left: 10px; bottom: 10px; z-index: 15;
+  background: rgba(17,20,26,.92); border: 1px solid var(--line); border-radius: 6px; padding: 3px;
+  box-shadow: 0 3px 10px rgba(0,0,0,.5);
+}
+#zoomctl #zoomLabel { min-width: 38px; text-align: center; }
+#spaceCrumb .crumb.here { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
