@@ -1,6 +1,6 @@
 # Plan: Spaces (pocket maps for non-euclidean areas)
 
-Status: planned, not started. Written 2026-10-02.
+Status: Phases 1–5 implemented 2026-10-02; Phase 6 partly (export by space, previews open on the main map). Written 2026-10-02.
 
 ## The problem
 

@@ -1,6 +1,6 @@
 import { S } from "./state.js";
 import { escapeHtml } from "./utils.js";
-import { clearSelection } from "./model.js";
+import { clearSelection, layersPresent } from "./model.js";
 import { normalize, resetHistory, save } from "./persistence.js";
 import { render, fitInitial } from "./app.js";
 import { mergeImport } from "./export-import.js";
@@ -22,11 +22,18 @@ function showBanner(data) {
   document.getElementById("previewSummary").innerHTML =
     (m.title ? `<b>${escapeHtml(m.title)}</b> ` : "") +
     (m.author ? `by ${escapeHtml(m.author)} ` : "") +
-    `· ${roomCount} room${roomCount !== 1 ? "s" : ""}` + (m.date ? ` · ${escapeHtml(m.date)}` : "") +
+    `· ${roomCount} room${roomCount !== 1 ? "s" : ""}` +
+    ((data.spaces || []).length ? ` in ${data.spaces.length + 1} maps (main + ${data.spaces.length} space${data.spaces.length !== 1 ? "s" : ""})` : "") + (m.date ? ` · ${escapeHtml(m.date)}` : "") +
     (data.partial ? ` · partial map` : "");
   banner().style.display = "flex";
 }
 function hideBanner() { banner().style.display = "none"; }
+// A shared/imported map opens on its main map, not on whichever space the sender happened to
+// be looking at — the recipient has no idea that space exists yet.
+function openOnMainMap() {
+  S.map.currentSpace = null;
+  S.map.currentLayer = layersPresent(null)[0];
+}
 
 export function enterPreview(data) {
   if (!data || !data.rooms) throw new Error("Not a valid map (no rooms).");
@@ -40,6 +47,7 @@ export function enterPreview(data) {
   S.pendingImport = data;
   S.map = JSON.parse(JSON.stringify(data));
   normalize();
+  openOnMainMap();
   clearSelection();
   resetHistory();
   S.previewMode = true;
@@ -62,7 +70,7 @@ export function exitPreview(action) {
   if (action === "replace" && !confirm("Replace the current map entirely?")) return;   // stay in preview
   restoreBackup();
   if (action === "replace") {
-    S.map = data; normalize(); clearSelection(); resetHistory(); save();
+    S.map = data; normalize(); openOnMainMap(); clearSelection(); resetHistory(); save();
   } else if (action === "merge") {
     mergeImport(data);
   }

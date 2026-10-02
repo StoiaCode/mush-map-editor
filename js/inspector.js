@@ -16,6 +16,13 @@ import { startRelease } from "./release.js";
 
 // ---------- Inspector ----------
 export function renderInspector() {
+  // A pending move (capture.js / release.js) locks editing; the banner above the map has the controls.
+  if (S.capture) {
+    inspector.innerHTML = `<h3>Moving rooms</h3><div class="empty-note">
+      <p>A move between spaces is being previewed. Editing is paused until you finish it or cancel.</p>
+      <p class="hint">Use the banner above the map. <b>Esc</b> cancels.</p></div>`;
+    return;
+  }
   // Area selected → area editor takes precedence
   const ar = S.selectedAreaId && S.map.areas.find(a => a.id === S.selectedAreaId);
   if (ar) {
@@ -252,7 +259,7 @@ export function gotoRoom(id) {
   if (!r) return;
   if (S.view !== "flat") { S.view = "flat"; updateViewButtons(); }
   if (!setSpace(r.space, r.z)) return;   // announces the move if it crosses into another space
-  selectSingle(id);
+  if (!S.capture) selectSingle(id);      // mid-move: just look, the preview owns the clicks
   render();
   centerOnRoom(r);
 }

@@ -2,7 +2,7 @@ import { DIRS, GRID_N } from "./constants.js";
 import { S } from "./state.js";
 import { uid, clamp, escapeHtml } from "./utils.js";
 import { roomInArea, roomsInArea, layersPresent, roomsOnLayer, clearSelection, spaceOf } from "./model.js";
-import { spaceName, layerName } from "./spaces.js";
+import { spaceName, layerName, announceLocation } from "./spaces.js";
 import { commit, resetHistory, save, defaultMap } from "./persistence.js";
 import { render } from "./app.js";
 import { centerOnRoom, centerCellView } from "./render-flat.js";
@@ -205,6 +205,7 @@ export function mergeImport(data) {
   S.map.currentSpace = first.space || null;
   S.map.currentLayer = first.z;
   commit(); render(); centerOnRoom(first);
+  if (first.space) announceLocation("Merged; now in");   // landed inside an imported space: say so
 }
 document.getElementById("newMapBtn").onclick = () => {
   if (!confirm("Start a new empty map? This clears the current map (export first if you want a backup).")) return;

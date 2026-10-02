@@ -21,6 +21,14 @@ import it as JSON for backups.
 - Link rooms across layers and gaps, including non-adjacent connections.
 - Rotatable 3D view of the whole map.
 - Area rectangles for marking zones that span every layer.
+- Spaces: separate pocket maps for "non-euclidean" bits, like an apartment
+  block whose upper floors don't fit next to the street tiles. A space hangs
+  off doors (ordinary exits) on the main map, has its own grid and floors
+  numbered from its door, and is always clearly marked (breadcrumb, coloured
+  frame, toast on every switch). Rooms mapped in the wrong place can be moved
+  into a space afterwards from an exit or a selection, with a preview that
+  catches fills leaking back into the street, and moved back out again. See
+  [docs/plans/spaces.md](docs/plans/spaces.md).
 - Color tags with an editable legend, onion-skin of neighbouring layers,
   multi-select with bulk edits, search, shortest-path finder, and a stats panel.
 - Undo and redo, plus JSON export and import.
