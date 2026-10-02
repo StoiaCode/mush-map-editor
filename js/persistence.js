@@ -119,14 +119,14 @@ export function commit() {
 // edit happened. Undo restores the previous map but shows you the space of the edit it took back
 // (otherwise undoing a change made inside a pocket space would happen somewhere off-screen).
 export function undo() {
-  if (S.histIdx <= 0) return;
+  if (S.histIdx <= 0 || S.capture) return;
   const was = S.map.currentSpace || null, undone = S.history[S.histIdx];
   S.histIdx--; S.map = JSON.parse(JSON.stringify(S.history[S.histIdx]));
   S.map.currentSpace = undone.currentSpace || null; S.map.currentLayer = undone.currentLayer;
   afterRestore(was, "Undid a change in");
 }
 export function redo() {
-  if (S.histIdx >= S.history.length - 1) return;
+  if (S.histIdx >= S.history.length - 1 || S.capture) return;
   const was = S.map.currentSpace || null;
   S.histIdx++; S.map = JSON.parse(JSON.stringify(S.history[S.histIdx]));
   afterRestore(was, "Redid a change in");

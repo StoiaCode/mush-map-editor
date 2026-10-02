@@ -79,16 +79,21 @@ export function shortLayerName(z, spaceId) {
 // announces the new location. Callers render afterwards.
 export function setSpace(id, layer) {
   id = id || null;
+  if (S.capture && id !== S.capture.source) {
+    toast("Finish or cancel the move into a space first.");
+    return false;
+  }
   const changed = id !== curSpace();
   S.map.currentSpace = id;
   if (layer != null) S.map.currentLayer = layer;
   else if (changed) S.map.currentLayer = layersPresent(id)[0];
   save();   // remember which space/layer you were viewing across reloads, like setLayer does
-  if (!changed) return;
+  if (!changed) return true;
   clearSelection();
   S.selectedAreaId = null; S.areaMergeSource = null;
   S.cam3d.fitted = false;
   announceLocation();
+  return true;
 }
 export function announceLocation(verb = "Now in") {
   const sp = curSpace();

@@ -48,6 +48,7 @@ export const S = {
   pendingImport: null,      // parsed map data awaiting a replace/add choice
   previewMode: false,       // true while S.map is a disposable sandbox showing pendingImport
   previewBackup: null,      // { map, history, histIdx, selection state, viewport } to restore on exit
+  capture: null,            // open "move into a space" preview (capture.js); blocks other editing while set
 };
 
 // ---------- DOM ----------

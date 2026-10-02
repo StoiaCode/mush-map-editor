@@ -11,6 +11,7 @@ import { centerOnRoom } from "./render-flat.js";
 import { updateViewButtons } from "./toolbar.js";
 import { setSpace, roomLocation, confirmDeleteRooms, spaceColor, shortLayerName } from "./spaces.js";
 import { spaceOf } from "./model.js";
+import { startDoorCapture, startSelectionCapture } from "./capture.js";
 
 // ---------- Inspector ----------
 export function renderInspector() {
@@ -83,6 +84,7 @@ export function renderInspector() {
           <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
         </select></div></div>` +
       `<div class="insec">
+        <button id="bulk_capture" style="width:100%;margin-bottom:6px;" title="Preview moving exactly these rooms into a separate pocket space">⧉ Move ${S.selection.size} rooms into a space…</button>
         <button id="bulk_clear" style="width:100%;margin-bottom:6px;">Clear selection</button>
         <button class="danger" id="bulk_del" style="width:100%">Delete ${S.selection.size} rooms</button>
       </div>` +
@@ -101,6 +103,7 @@ export function renderInspector() {
       commit(); render();
     };
     document.getElementById("bulk_clear").onclick = () => { clearSelection(); render(); };
+    document.getElementById("bulk_capture").onclick = () => startSelectionCapture([...S.selection]);
     document.getElementById("bulk_del").onclick = () => {
       if (confirmDeleteRooms([...S.selection])) { for (const id of [...S.selection]) deleteRoom(id); clearSelection(); commit(); render(); }
     };
@@ -156,6 +159,7 @@ export function renderInspector() {
     const fly = r.exitFly && r.exitFly[d];
     h += `<div class="exitrow"><span class="dir">${d}</span>
       <span class="tgt${crosses ? " crossing" : ""}" data-goto="${r.exits[d]}"${crosses ? ` style="color:${spaceColor(spaceOf(t))}" title="Leads into another space — click to go there"` : ""}>${escapeHtml(tname)}</span>
+      ${t && !crosses ? `<button class="capbtn" data-capture="${d}" title="Move everything behind this exit into a pocket space… (opens a preview first)">⧉</button>` : ""}
       <button class="flytoggle${fly ? " on" : ""}" data-fly="${d}" title="Flight-only exit (requires flying)">✈</button>
       <button data-delexit="${d}">✕</button></div>`;
   }
@@ -230,6 +234,7 @@ export function renderInspector() {
   document.querySelectorAll("[data-delexit]").forEach(b => b.onclick = () => { delete r.exits[b.dataset.delexit]; delete r.exitFly[b.dataset.delexit]; commit(); render(); });
   document.querySelectorAll("[data-fly]").forEach(b => b.onclick = () => { const d = b.dataset.fly; setExitFly(r.id, d, !(r.exitFly && r.exitFly[d])); commit(); render(); });
   document.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => gotoRoom(el.dataset.goto));
+  document.querySelectorAll("[data-capture]").forEach(b => b.onclick = () => startDoorCapture(r.id, b.dataset.capture));
   document.getElementById("delRoom").onclick = () => {
     if (confirmDeleteRooms([r.id])) { deleteRoom(r.id); commit(); render(); }
   };
@@ -242,7 +247,7 @@ export function gotoRoom(id) {
   const r = S.map.rooms[id];
   if (!r) return;
   if (S.view !== "flat") { S.view = "flat"; updateViewButtons(); }
-  setSpace(r.space, r.z);   // announces the move if it crosses into another space
+  if (!setSpace(r.space, r.z)) return;   // announces the move if it crosses into another space
   selectSingle(id);
   render();
   centerOnRoom(r);

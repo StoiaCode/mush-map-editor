@@ -16,7 +16,7 @@ export function updateViewButtons() {
   document.querySelectorAll("#viewseg button").forEach(b => b.classList.toggle("active", b.dataset.view === S.view));
 }
 document.querySelectorAll("#viewseg button").forEach(b => {
-  b.onclick = () => { S.view = b.dataset.view; updateViewButtons(); render(); };
+  b.onclick = () => { if (S.capture) return; S.view = b.dataset.view; updateViewButtons(); render(); };
 });
 document.getElementById("layerUp").onclick = () => stepLayer(+1);
 // "↩ Main map" lives in both the breadcrumb and the corner tag, which re-render constantly
@@ -24,6 +24,7 @@ document.addEventListener("click", e => { if (e.target.closest("[data-leave-spac
 document.getElementById("layerDown").onclick = () => stepLayer(-1);
 // Link and Path are mutually exclusive interaction modes.
 export function setMode(mode) {
+  if (S.capture && mode !== "none") { alert("Finish or cancel the move into a space first (Esc cancels)."); return; }
   S.linkMode = (mode === "link");
   S.pathMode = (mode === "path");
   S.areaMode = (mode === "area");

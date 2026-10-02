@@ -375,3 +375,29 @@ select { cursor: pointer; }
 .sp-actions { display: flex; gap: 6px; }
 .sp-actions button, .spacerow > .sp-enter { padding: 3px 9px; font-size: 11px; }
 .sp-enter.active:disabled { opacity: 1; background: transparent; color: var(--accent); border-color: transparent; }
+/* Capture preview ("move into a space") */
+.exitrow .capbtn { color: #a87ce8; }
+#captureBanner {
+  display: none; padding: 8px 12px; font-size: 12px; line-height: 1.5;
+  background: rgba(168,124,232,.12); border-bottom: 2px solid var(--cap-color, #a87ce8);
+  max-height: 45vh; overflow-y: auto;
+}
+#captureBanner .cap-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+#captureBanner .cap-line { margin: 3px 0; }
+#captureBanner .cap-warn { color: #f1c84a; }
+#captureBanner .cap-err { color: #ff8a8a; }
+#captureBanner .cap-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+#captureBanner .cap-controls .spacer { flex: 1; }
+#captureBanner .cap-controls input[type=text] { min-width: 180px; }
+#captureBanner .cap-layer, #captureBanner .cap-pathroom { padding: 1px 6px; font-size: 11px; }
+#captureBanner .cap-pathroom { color: #ff8a8a; border-color: rgba(226,85,85,.6); }
+#capGo { background: var(--accent2); border-color: var(--accent); color: #fff; font-weight: 700; }
+.room.cap-in { box-shadow: 0 0 0 4px var(--cap-color, #a87ce8), 0 0 16px var(--cap-color, #a87ce8); }
+.room.cap-in.cap-leak { box-shadow: 0 0 0 4px #e25555, 0 0 16px #e25555; }
+.room.cap-out { opacity: .28; filter: grayscale(.7); }
+.room.cap-anchor { opacity: 1; outline: 3px dashed #fff; outline-offset: 3px; }
+.room.cap-excluded { opacity: .45; filter: grayscale(1); }
+.room.cap-excluded::after {
+  content: "✕"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 34px; color: #e25555; font-weight: 700; pointer-events: none;
+}

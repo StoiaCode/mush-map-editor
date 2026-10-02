@@ -13,6 +13,7 @@ import { gotoRoom } from "./inspector.js";
 import { clearPath, setPathHint, computePath } from "./search-path.js";
 import { setBindPick } from "./toolbar.js";
 import { confirmDeleteRooms, roomLocation, shortLayerName } from "./spaces.js";
+import { captureClick, cancelCapture } from "./capture.js";
 
 // ---------- Pointer interactions ----------
 const CLICK_THRESH = 4;
@@ -34,6 +35,13 @@ viewport.addEventListener("mousedown", e => {
     viewport.classList.add("panning"); e.preventDefault(); return;
   }
   if (e.button !== 0) return;
+  // Capture preview: a room click toggles it in/out of the move; empty space still pans.
+  if (S.capture) {
+    const capEl = e.target.closest(".room:not(.ghost)");
+    if (capEl) { captureClick(capEl.dataset.id); e.preventDefault(); return; }
+    S.drag = { type:"pan", x0:e.clientX, y0:e.clientY, px:S.panX, py:S.panY, moved:false };
+    viewport.classList.add("panning"); e.preventDefault(); return;
+  }
   // Binding a stop's second room: the next room click (anywhere, any layer) is consumed here,
   // ahead of every other mode, so it can't be mistaken for a normal transit-mode station toggle.
   if (S.transitBindPick) {
@@ -280,6 +288,7 @@ window.addEventListener("mouseup", e => {
 });
 viewport.addEventListener("click", e => {
   const badge = e.target.closest(".vbadge");
+  if (badge && S.capture) { e.stopPropagation(); return; }   // no wandering off mid-preview
   if (badge) {
     const r = S.map.rooms[badge.closest(".room").dataset.id];
     if (badge.dataset.vbadge === "train") {
@@ -295,7 +304,7 @@ viewport.addEventListener("click", e => {
 });
 // double-click an empty cell to create a room (single click no longer creates)
 viewport.addEventListener("dblclick", e => {
-  if (S.view !== "flat" || S.linkMode || S.pathMode || S.areaMode) return;
+  if (S.view !== "flat" || S.linkMode || S.pathMode || S.areaMode || S.capture) return;
   if (e.target.closest(".room:not(.ghost)")) return;
   const w = screenToWorld(e.clientX, e.clientY);
   const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
@@ -413,6 +422,8 @@ viewport.addEventListener("wheel", e => {
 window.addEventListener("keydown", e => {
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  // While the capture preview is open the map is read-only: Esc cancels, nothing else edits.
+  if (S.capture) { if (e.key === "Escape") cancelCapture(); return; }
   // Undo / redo (global, works with or without a selection)
   if (e.ctrlKey || e.metaKey) {
     const k = e.key.toLowerCase();

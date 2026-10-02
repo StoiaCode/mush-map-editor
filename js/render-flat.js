@@ -6,6 +6,7 @@ import { spaceName, layerName, shortLayerName, crossExits, spaceColor, roomsInSp
 import { save } from "./persistence.js";
 import { render } from "./app.js";
 import { loadRoomImage } from "./image-loader.js";
+import { captureClass } from "./capture.js";
 
 // ---------- Layer navigation ----------
 export function setLayer(z) {
@@ -157,10 +158,48 @@ export function renderFlat() {
     for (const ex of exits) drawDirLabel(ex.from, ex.to, ex.dir, frac);
   }
 
+  if (S.capture) drawCaptureDoors(z);
+
   // --- current layer rooms (solid, on top) ---
   for (const r of roomsOnLayer(z)) world.appendChild(makeRoomEl(r, false));
 }
 
+// Capture preview: every exit that will become a door of the new space, in red — a line when
+// both ends are on this layer, otherwise a stub pointing the way it goes.
+function drawCaptureDoors(z) {
+  const c = S.capture;
+  for (const id of c.ids) {
+    const r = S.map.rooms[id];
+    if (r.z !== z || !inSpace(r, c.source)) continue;
+    for (const [dir, tid] of Object.entries(r.exits)) {
+      const t = S.map.rooms[tid];
+      if (!t || c.ids.has(tid)) continue;
+      const a = roomWorldCenter(r);
+      if (t.z === z && inSpace(t, c.source)) {
+        const b = roomWorldCenter(t);
+        drawDoorLine(a.x, a.y, b.x, b.y);
+      } else {
+        const [dx, dy] = VEC[dir] || (dir === "UP" ? [0.6, -0.6] : [-0.6, 0.6]);
+        drawDoorLine(a.x, a.y, a.x + dx*CELL*0.75, a.y + dy*CELL*0.75, "🚪 " + dir + " → " + t.name);
+      }
+    }
+  }
+}
+function drawDoorLine(x1, y1, x2, y2, label) {
+  const ns = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+  line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+  line.setAttribute("stroke", "#e25555"); line.setAttribute("stroke-width", "5");
+  line.setAttribute("stroke-linecap", "round");
+  svg.appendChild(line);
+  if (!label) return;
+  const txt = document.createElementNS(ns, "text");
+  txt.setAttribute("x", x2); txt.setAttribute("y", y2 - 6);
+  txt.setAttribute("text-anchor", "middle"); txt.setAttribute("class", "exitlabel");
+  txt.style.fill = "#ff8a8a";
+  txt.textContent = label; svg.appendChild(txt);
+}
 export function drawAreaFlat(ar) {
   const ns = "http://www.w3.org/2000/svg";
   const c = areaHex(ar);
@@ -270,7 +309,8 @@ export function makeRoomEl(r, ghost) {
     + (!ghost && r.id === S.pendingLink ? " linksource" : "")
     + (!ghost && r.id === S.pathStart ? " linksource" : "")
     + (!ghost && S.pathRooms.has(r.id) ? " pathhit" : "")
-    + (!ghost && S.searchTerm && S.searchMatches.includes(r.id) ? " searchhit" : "");
+    + (!ghost && S.searchTerm && S.searchMatches.includes(r.id) ? " searchhit" : "")
+    + (!ghost && S.capture ? captureClass(r) : "");
   el.dataset.id = r.id;
   const px = SIZE_PX[r.size] || SIZE_PX.medium;
   const c = roomWorldCenter(r);
