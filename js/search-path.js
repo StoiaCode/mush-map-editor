@@ -5,6 +5,7 @@ import { resolveStop } from "./model.js";
 import { gotoRoom } from "./inspector.js";
 import { render } from "./app.js";
 import { setMode } from "./toolbar.js";
+import { spaceName, spaceColor } from "./spaces.js";
 
 // ---------- Search ----------
 export function runSearch(term) {
@@ -25,7 +26,10 @@ export function updateSearchInfo() {
   const el = document.getElementById("searchInfo");
   if (!S.searchTerm) { el.textContent = ""; return; }
   const n = S.searchMatches.length;
-  el.textContent = n ? `${n} match${n !== 1 ? "es" : ""} · ↵ to jump` : "no matches";
+  // matches in other spaces aren't highlighted on screen, so say how many there are
+  const here = S.map.currentSpace || null;
+  const away = S.searchMatches.filter(id => (S.map.rooms[id].space || null) !== here).length;
+  el.textContent = n ? `${n} match${n !== 1 ? "es" : ""}` + (away ? ` (${away} in other spaces)` : "") + " · ↵ to jump" : "no matches";
 }
 export function jumpNextMatch() {
   if (!S.searchMatches.length) return;
@@ -145,13 +149,14 @@ export function computePath(startId, endId) {
       `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}` +
         (flyCount ? ` · <span class="flystep" style="font-weight:700">${flyCount} flown</span>` : "") +
         (trainCount ? ` · <span class="trainstep" style="font-weight:700">${trainCount} train leg${trainCount !== 1 ? "s" : ""}</span>` : "") + `</div>` +
-      dirsHtml +
+      dirsHtml + spacesHtml(res.rooms) +
       `<div>${flyChk}</div>` +
       `<button id="pathClose">✕ clear</button>`;
   }
   document.getElementById("pathClose").onclick = clearPath;
   const fc = document.getElementById("pathFly");
   if (fc) fc.onchange = () => { S.pathCanFly = fc.checked; if (S.pathLast) computePath(S.pathLast.startId, S.pathLast.endId); };
+  box.querySelectorAll(".pathleg").forEach(b => { b.onclick = () => gotoRoom(b.dataset.goto); });
   box.querySelectorAll(".pathcopy").forEach(b => {
     b.onclick = () => copyText(b.dataset.copy).then(() => {
       const prev = b.textContent; b.textContent = "✓";
@@ -159,6 +164,19 @@ export function computePath(startId, endId) {
     }).catch(() => {});
   });
   render();
+}
+// When a route crosses spaces, list the hand-offs ("Main map → ⧉ Highrise Apts") with each
+// leg clickable, since only the part of the route in the viewed space is highlighted.
+function spacesHtml(roomIds) {
+  const legs = [];
+  for (const id of roomIds) {
+    const sp = S.map.rooms[id].space || null;
+    if (!legs.length || legs[legs.length - 1].sp !== sp) legs.push({ sp, id });
+  }
+  if (legs.length < 2) return "";
+  return `<div class="pathspaces">Crosses spaces: ` + legs.map(l =>
+    `<button class="pathleg" data-goto="${escapeAttr(l.id)}" style="color:${spaceColor(l.sp)}">${l.sp ? "⧉ " : ""}${escapeHtml(spaceName(l.sp))}</button>`
+  ).join(" → ") + `</div>`;
 }
 export function copyText(t) {
   if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
@@ -180,7 +198,7 @@ export function setPathHint() {
   if (!S.pathMode) return;
   box.style.display = "block";
   box.innerHTML = S.pathStart
-    ? `<div>Start: <b>${escapeHtml(roomName(S.pathStart))}</b> — now click the destination (any layer).</div><button id="pathClose">✕ cancel</button>`
+    ? `<div>Start: <b>${escapeHtml(roomName(S.pathStart))}</b> — now click the destination (any layer or space).</div><button id="pathClose">✕ cancel</button>`
     : `<div>Pathfinder: click the <b>start</b> room.</div><button id="pathClose">✕ cancel</button>`;
   document.getElementById("pathClose").onclick = clearPath;
 }

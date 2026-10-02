@@ -9,6 +9,7 @@ import { render3d, resize3d } from "./render-3d.js";
 import { buildLegend, buildStats, traitCounts } from "./stats-legend.js";
 import { runSearch, jumpNextMatch, setPathHint } from "./search-path.js";
 import { clearImageCache, getImageCacheStats } from "./image-loader.js";
+import { leaveSpace } from "./spaces.js";
 
 // ---------- Toolbar wiring ----------
 export function updateViewButtons() {
@@ -18,6 +19,8 @@ document.querySelectorAll("#viewseg button").forEach(b => {
   b.onclick = () => { S.view = b.dataset.view; updateViewButtons(); render(); };
 });
 document.getElementById("layerUp").onclick = () => stepLayer(+1);
+// "↩ Main map" lives in both the breadcrumb and the corner tag, which re-render constantly
+document.addEventListener("click", e => { if (e.target.closest("[data-leave-space]")) leaveSpace(); });
 document.getElementById("layerDown").onclick = () => stepLayer(-1);
 // Link and Path are mutually exclusive interaction modes.
 export function setMode(mode) {

@@ -14,12 +14,16 @@ import "./interactions.js";
 import "./preview.js";
 import "./export-import.js";
 import { applyUrlSync } from "./sync.js";
+import { updateLocationUI } from "./spaces.js";
+import { updateSearchInfo } from "./search-path.js";
 
 // ---------- Render dispatcher ----------
 // Central so every other module can trigger a redraw via one import, instead of
 // each needing to know about renderFlat/render3d/renderInspector individually.
 export function render() {
   updateLayerLabel();
+  updateLocationUI();
+  updateSearchInfo();   // its "N in other spaces" count depends on which space is in view
   if (S.view === "flat") {
     viewport.style.display = ""; view3dEl.classList.remove("active");
     renderFlat();

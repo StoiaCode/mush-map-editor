@@ -12,6 +12,7 @@ import { screenToWorld, roomWorldCenter, zoomAt, applyTransform, renderFlat } fr
 import { gotoRoom } from "./inspector.js";
 import { clearPath, setPathHint, computePath } from "./search-path.js";
 import { setBindPick } from "./toolbar.js";
+import { confirmDeleteRooms, roomLocation, shortLayerName } from "./spaces.js";
 
 // ---------- Pointer interactions ----------
 const CLICK_THRESH = 4;
@@ -20,7 +21,7 @@ export function setPending(id) {
   const hint = document.getElementById("linkHint");
   if (id) {
     hint.style.display = "";
-    hint.textContent = "linking from “" + (S.map.rooms[id] ? S.map.rooms[id].name : "?") + "” — change layers if needed, click the target · Esc cancels";
+    hint.textContent = "linking from “" + (S.map.rooms[id] ? S.map.rooms[id].name : "?") + "” — change layers or spaces if needed, click the target · Esc cancels";
   } else {
     hint.style.display = "none";
   }
@@ -283,6 +284,8 @@ viewport.addEventListener("click", e => {
     const r = S.map.rooms[badge.closest(".room").dataset.id];
     if (badge.dataset.vbadge === "train") {
       openRidePicker(r.id, e.clientX, e.clientY);
+    } else if (badge.dataset.vbadge === "door") {
+      gotoRoom(badge.dataset.target);
     } else {
       const dir = badge.dataset.vbadge === "up" ? "UP" : "DOWN";
       if (r.exits[dir]) gotoRoom(r.exits[dir]);
@@ -383,7 +386,8 @@ function openRidePicker(roomId, sx, sy) {
       if (!r) continue;
       const btn = document.createElement("button");
       btn.className = "ride-stop";
-      btn.textContent = entryName(entry) + (r.z !== here.z ? ` (L${r.z})` : "");
+      btn.textContent = entryName(entry) + ((r.space || null) !== (here.space || null) ? ` (${roomLocation(r)})`
+                                          : r.z !== here.z ? ` (${shortLayerName(r.z, r.space || null)})` : "");
       btn.onclick = () => { closeRidePicker(); gotoRoom(targetId); };
       list.appendChild(btn);
     }
@@ -430,7 +434,7 @@ window.addEventListener("keydown", e => {
       e.preventDefault(); return;
     }
     if (S.selection.size > 1) {
-      if (confirm(`Delete ${S.selection.size} selected rooms?`)) {
+      if (confirmDeleteRooms([...S.selection])) {
         for (const id of [...S.selection]) deleteRoom(id);
         clearSelection(); commit(); render();
       }
@@ -438,7 +442,7 @@ window.addEventListener("keydown", e => {
     }
     if (S.selectedId) {
       const r = S.map.rooms[S.selectedId];
-      if (r && confirm(`Delete "${r.name}"?`)) { deleteRoom(S.selectedId); commit(); render(); }
+      if (r && confirmDeleteRooms([r.id])) { deleteRoom(S.selectedId); commit(); render(); }
       e.preventDefault(); return;
     }
     return;

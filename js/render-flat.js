@@ -2,7 +2,7 @@ import { CELL, GRID_N, WORLD, SIZE_PX, COMPASS, VEC, OPP } from "./constants.js"
 import { S, viewport, world, svg, gridCanvas, ctx, layerLabel, zoomLabel } from "./state.js";
 import { colorOf, areaHex, hexA, escapeHtml, clamp } from "./utils.js";
 import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor, transitEdges, areasInSpace, inSpace, curSpace, spaceOf } from "./model.js";
-import { spaceName } from "./spaces.js";
+import { spaceName, layerName, shortLayerName, crossExits, spaceColor, roomsInSpace } from "./spaces.js";
 import { save } from "./persistence.js";
 import { render } from "./app.js";
 import { loadRoomImage } from "./image-loader.js";
@@ -27,8 +27,9 @@ export function stepLayer(delta) {
 export function updateLayerLabel() {
   const ls = layersPresent();
   const n = roomsOnLayer(S.map.currentLayer).length;
-  layerLabel.textContent = "Layer " + S.map.currentLayer + (n ? `` : ` (empty)`);
-  layerLabel.title = "Layers in use: " + ls.join(", ");
+  const sp = curSpace();
+  layerLabel.textContent = layerName(S.map.currentLayer, sp) + (n ? `` : ` (empty)`);
+  layerLabel.title = "Raw layer " + S.map.currentLayer + " · layers in use here: " + ls.join(", ");
 }
 
 // ---------- View transform ----------
@@ -74,6 +75,11 @@ export function resizeCanvas() {
 export function positionGrid() {
   const w = gridCanvas.width, h = gridCanvas.height;
   ctx.clearRect(0, 0, w, h);
+  // inside a space the whole grid takes on the space's colour, so you can't mistake it for the main map
+  const sp = S.map && curSpace();
+  const tint = sp ? spaceColor(sp) : null;
+  if (tint) { ctx.fillStyle = hexA(tint, 0.05); ctx.fillRect(0, 0, w, h); }
+  const major = tint ? hexA(tint, 0.30) : "#2c3340", minor = tint ? hexA(tint, 0.14) : "#212733";
   const step = CELL * S.scale;
   if (step < 6) return;
   const startX = S.panX % step, startY = S.panY % step;
@@ -81,12 +87,12 @@ export function positionGrid() {
   ctx.lineWidth = 1;
   let col = firstCol;
   for (let x = startX; x < w; x += step, col++) {
-    ctx.strokeStyle = (col % 5 === 0) ? "#2c3340" : "#212733";
+    ctx.strokeStyle = (col % 5 === 0) ? major : minor;
     ctx.beginPath(); ctx.moveTo(Math.round(x)+0.5, 0); ctx.lineTo(Math.round(x)+0.5, h); ctx.stroke();
   }
   let row = firstRow;
   for (let y = startY; y < h; y += step, row++) {
-    ctx.strokeStyle = (row % 5 === 0) ? "#2c3340" : "#212733";
+    ctx.strokeStyle = (row % 5 === 0) ? major : minor;
     ctx.beginPath(); ctx.moveTo(0, Math.round(y)+0.5); ctx.lineTo(w, Math.round(y)+0.5); ctx.stroke();
   }
 }
@@ -129,7 +135,9 @@ export function renderFlat() {
       } else {
         const a = roomWorldCenter(r);
         const [dx, dy] = VEC[dir];
-        drawStub(a.x, a.y, a.x + dx*CELL*0.7, a.y + dy*CELL*0.7, dir + "→" + offTarget(t));
+        const door = !inSpace(t, curSpace());
+        drawStub(a.x, a.y, a.x + dx*CELL*0.7, a.y + dy*CELL*0.7, dir + (door ? " ⧉ " : "→") + offTarget(t),
+                 door ? spaceColor(spaceOf(t)) : null);
       }
     }
   }
@@ -228,7 +236,7 @@ function drawTransitLinesFlat(z) {
 // Stub label for where an off-layer / off-space exit leads: "L2" on the same map,
 // or the other space's name when it leaves the one being viewed.
 function offTarget(t) {
-  return inSpace(t, curSpace()) ? "L" + t.z : spaceName(spaceOf(t));
+  return inSpace(t, curSpace()) ? shortLayerName(t.z, curSpace()) : spaceName(spaceOf(t));
 }
 function drawTransitConnector(x1, y1, x2, y2, color) {
   const ns = "http://www.w3.org/2000/svg";
@@ -287,13 +295,38 @@ export function makeRoomEl(r, ghost) {
   el.title = r.name + (tag ? "  ·  " + tag : "");
   el.innerHTML = `<span class="rname">${escapeHtml(r.name)}</span>`;
   if (!ghost) {
-    if (r.exits.UP)   el.appendChild(vbadge("up", "↑", r.exitFly && r.exitFly.UP));
-    if (r.exits.DOWN) el.appendChild(vbadge("down", "↓", r.exitFly && r.exitFly.DOWN));
+    if (r.exits.UP)   el.appendChild(markDoor(vbadge("up", "↑", r.exitFly && r.exitFly.UP), r, "UP"));
+    if (r.exits.DOWN) el.appendChild(markDoor(vbadge("down", "↓", r.exitFly && r.exitFly.DOWN), r, "DOWN"));
+    const doors = crossExits(r);
+    if (doors.length) el.appendChild(doorBadge(doors));
     const lines = stationLinesFor(r.id);
     if (lines.length) el.appendChild(trainBadge(lines));
     if (r.traits && r.traits.length) { const b = traitBadge(r.traits); if (b) el.appendChild(b); }
   }
   return el;
+}
+// An UP/DOWN badge whose exit leaves this space gets the destination's colour and says where it goes.
+function markDoor(b, r, dir) {
+  const t = S.map.rooms[r.exits[dir]];
+  if (t && !inSpace(t, spaceOf(r))) {
+    b.classList.add("door"); b.style.borderColor = spaceColor(spaceOf(t));
+    b.title = (b.title ? b.title + " · " : "") + dir.toLowerCase() + " → " + spaceName(spaceOf(t));
+  }
+  return b;
+}
+// "This room is a door": ⧉ + room count of the space it leads into, or ↩ when it leads back to
+// the main map. Clicking it goes through (see interactions.js). Prefers a door into a named space.
+export function doorBadge(doors) {
+  const d = doors.find(x => spaceOf(x.target)) || doors[0];
+  const sp = spaceOf(d.target);
+  const b = document.createElement("div");
+  b.className = "vbadge doorbadge";
+  b.dataset.vbadge = "door"; b.dataset.target = d.target.id;
+  b.textContent = sp ? "⧉" + roomsInSpace(sp).length : "↩";
+  b.style.borderColor = spaceColor(sp); b.style.color = spaceColor(sp);
+  const names = [...new Set(doors.map(x => spaceName(spaceOf(x.target))))];
+  b.title = "Door to " + names.join(", ") + " — click to go through";
+  return b;
 }
 export function traitBadge(traitIds) {
   const defs = traitIds.map(id => S.map.traits.find(t => t.id === id)).filter(Boolean);
@@ -348,16 +381,17 @@ export function drawDirLabel(from, to, dir, frac) {
   txt.textContent = dir;
   svg.appendChild(txt);
 }
-export function drawStub(x1, y1, x2, y2, label) {
+export function drawStub(x1, y1, x2, y2, label, color) {
   const ns = "http://www.w3.org/2000/svg";
   const line = document.createElementNS(ns, "line");
   line.setAttribute("x1", x1); line.setAttribute("y1", y1);
   line.setAttribute("x2", x2); line.setAttribute("y2", y2);
-  line.setAttribute("stroke", "#5b9dff"); line.setAttribute("stroke-width", "2.5");
-  line.setAttribute("stroke-dasharray", "5,4"); line.setAttribute("marker-end", "url(#arrow)");
+  line.setAttribute("stroke", color || "#5b9dff"); line.setAttribute("stroke-width", color ? "3.5" : "2.5");
+  line.setAttribute("stroke-dasharray", color ? "2,3" : "5,4"); line.setAttribute("marker-end", "url(#arrow)");
   svg.appendChild(line);
   const txt = document.createElementNS(ns, "text");
   txt.setAttribute("x", x2); txt.setAttribute("y", y2 - 4);
   txt.setAttribute("text-anchor", "middle"); txt.setAttribute("class", "exitlabel");
+  if (color) txt.style.fill = color;
   txt.textContent = label; svg.appendChild(txt);
 }

@@ -127,7 +127,8 @@ select { cursor: pointer; }
 .field textarea { resize: vertical; min-height: 60px; }
 /* Room panel: let the description grow to fill leftover sidebar space, so Delete Room
    sits at the bottom instead of leaving a dead gap (only applies to the room-info section). */
-.insec-info { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* no min-height:0 here: on a short screen the panel should scroll, not squash this section into the next */
+.insec-info { flex: 1 0 auto; display: flex; flex-direction: column; }
 .field-grow { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 60px; }
 .field-grow textarea { flex: 1 1 auto; min-height: 40px; resize: none; }   /* height now follows the layout, not a manual drag */
 .empty-note { padding: 16px 12px; color: var(--muted); line-height: 1.5; }
@@ -316,3 +317,42 @@ select { cursor: pointer; }
 #zoomctl { display: inline-flex; align-items: center; gap: 4px; }
 .iconbtn { width: 28px; padding: 5px 0; text-align: center; }
 #layerLabel { min-width: 64px; text-align: center; font-weight: 700; }
+
+/* ---------- Spaces: always show where you are (docs/plans/spaces.md) ---------- */
+#spaceCrumb { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; }
+#spaceCrumb .crumb { white-space: nowrap; }
+#spaceCrumb .crumb.link { font-weight: 700; padding: 3px 7px; }
+#spaceCrumb .crumbsep { color: var(--muted); }
+/* inside a space: a frame in the space's colour around the map (outline paints over canvas too) */
+#app.in-space #viewport, #app.in-space #canvas3d { outline: 3px solid var(--space-color); outline-offset: -3px; }
+#spaceTag {
+  position: absolute; top: 10px; left: 10px; z-index: 15;
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 340px);
+  padding: 5px 6px 5px 10px; border-radius: 6px;
+  background: rgba(17,20,26,.92); border: 2px solid var(--space-color);
+  box-shadow: 0 3px 10px rgba(0,0,0,.5);
+}
+#spaceTag .tagname { color: var(--space-color); font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#spaceTag .taglayer { color: var(--text); font-weight: 600; white-space: nowrap; }
+#spaceTag button { padding: 3px 8px; white-space: nowrap; }
+#app.inspector-collapsed #spaceTag { max-width: calc(100% - 40px); }
+#toast {
+  position: absolute; top: 14px; left: 50%; transform: translate(-50%, -8px); z-index: 30;
+  padding: 7px 14px; border-radius: 6px; background: #11141a; border: 1px solid var(--line);
+  box-shadow: 0 6px 18px rgba(0,0,0,.6); font-size: 13px; white-space: nowrap;
+  opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast .tdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
+#app.in-space #toast { top: 52px; }
+/* door badges: the room leads into another space */
+.vbadge.doorbadge { top: 50%; right: -12px; transform: translateY(-50%); border-width: 2px; font-size: 10px; }
+.vbadge.door { border-width: 2px; }
+.roomloc { margin: 8px 12px 0; padding: 4px 8px; border-left: 3px solid; background: var(--panel2); border-radius: 0 4px 4px 0; font-weight: 600; }
+.exitrow .tgt.crossing { font-weight: 700; }
+#pathResult .pathspaces { margin: 6px 0; font-size: 12px; }
+#pathResult .pathleg { padding: 2px 6px; font-weight: 700; }
+@media (max-width: 700px) {
+  #spaceTag { max-width: calc(100% - 20px); }
+  #toast { white-space: normal; max-width: calc(100% - 32px); }
+}

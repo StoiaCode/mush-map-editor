@@ -3,6 +3,7 @@ import { emptyTagLabels } from "./constants.js";
 import { S, saveStatus } from "./state.js";
 import { layersPresent } from "./model.js";
 import { render } from "./app.js";
+import { announceLocation } from "./spaces.js";
 
 // ---------- Persistence ----------
 export function defaultMap() { return { version: 3, rooms: {}, areas: [], spaces: [], transitLines: [], traits: [], currentSpace: null, currentLayer: 0, tagLabels: emptyTagLabels() }; }
@@ -114,9 +115,23 @@ export function commit() {
   save();
   updateUndoButtons();
 }
-export function undo() { if (S.histIdx > 0) { S.histIdx--; S.map = JSON.parse(JSON.stringify(S.history[S.histIdx])); afterRestore(); } }
-export function redo() { if (S.histIdx < S.history.length - 1) { S.histIdx++; S.map = JSON.parse(JSON.stringify(S.history[S.histIdx])); afterRestore(); } }
-function afterRestore() {
+// Each snapshot also records the space/layer being viewed when it was committed, i.e. where that
+// edit happened. Undo restores the previous map but shows you the space of the edit it took back
+// (otherwise undoing a change made inside a pocket space would happen somewhere off-screen).
+export function undo() {
+  if (S.histIdx <= 0) return;
+  const was = S.map.currentSpace || null, undone = S.history[S.histIdx];
+  S.histIdx--; S.map = JSON.parse(JSON.stringify(S.history[S.histIdx]));
+  S.map.currentSpace = undone.currentSpace || null; S.map.currentLayer = undone.currentLayer;
+  afterRestore(was, "Undid a change in");
+}
+export function redo() {
+  if (S.histIdx >= S.history.length - 1) return;
+  const was = S.map.currentSpace || null;
+  S.histIdx++; S.map = JSON.parse(JSON.stringify(S.history[S.histIdx]));
+  afterRestore(was, "Redid a change in");
+}
+function afterRestore(wasSpace, verb) {
   // prune stale selection / transient state, clamp the layer, redraw
   const map = S.map;
   for (const id of [...S.selection]) if (!map.rooms[id]) S.selection.delete(id);
@@ -134,6 +149,8 @@ function afterRestore() {
   if (hint) hint.style.display = "none";
   S.pathStart = null; S.pathRooms = new Set();
   save(); render(); updateUndoButtons();
+  // an undo/redo that lands in a different space must say so, or the map seems to jump at random
+  if ((map.currentSpace || null) !== wasSpace) { S.cam3d.fitted = false; announceLocation(verb); }
 }
 export function updateUndoButtons() {
   const u = document.getElementById("undoBtn"), r = document.getElementById("redoBtn");

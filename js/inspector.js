@@ -9,6 +9,8 @@ import { commit, save } from "./persistence.js";
 import { render } from "./app.js";
 import { centerOnRoom } from "./render-flat.js";
 import { updateViewButtons } from "./toolbar.js";
+import { setSpace, roomLocation, confirmDeleteRooms, spaceColor, shortLayerName } from "./spaces.js";
+import { spaceOf } from "./model.js";
 
 // ---------- Inspector ----------
 export function renderInspector() {
@@ -100,13 +102,13 @@ export function renderInspector() {
     };
     document.getElementById("bulk_clear").onclick = () => { clearSelection(); render(); };
     document.getElementById("bulk_del").onclick = () => {
-      if (confirm(`Delete ${S.selection.size} selected rooms?`)) { for (const id of [...S.selection]) deleteRoom(id); clearSelection(); commit(); render(); }
+      if (confirmDeleteRooms([...S.selection])) { for (const id of [...S.selection]) deleteRoom(id); clearSelection(); commit(); render(); }
     };
     return;
   }
 
   const r = S.map.rooms[S.selectedId];
-  let h = `<h3>Room — Layer ${r.z}</h3>`;
+  let h = `<h3>Room</h3><div class="roomloc" style="border-color:${spaceColor(spaceOf(r))}">📍 ${escapeHtml(roomLocation(r))}</div>`;
   h += `<div class="insec insec-info">
     <div class="field"><label>Name</label><input type="text" id="f_name" value="${escapeAttr(r.name)}"></div>
     <div class="field field-grow"><label>Description / notes</label><textarea id="f_desc">${escapeHtml(r.description)}</textarea></div>
@@ -149,10 +151,11 @@ export function renderInspector() {
   if (!exitDirs.length) h += `<div class="hint">No exits yet.</div>`;
   for (const d of exitDirs) {
     const t = S.map.rooms[r.exits[d]];
-    const tname = t ? t.name + (t.z !== r.z ? ` (L${t.z})` : "") : "??";
+    const crosses = t && spaceOf(t) !== spaceOf(r);
+    const tname = !t ? "??" : crosses ? t.name + ` (⧉ ${roomLocation(t)})` : t.name + (t.z !== r.z ? ` (${shortLayerName(t.z, spaceOf(t))})` : "");
     const fly = r.exitFly && r.exitFly[d];
     h += `<div class="exitrow"><span class="dir">${d}</span>
-      <span class="tgt" data-goto="${r.exits[d]}">${escapeHtml(tname)}</span>
+      <span class="tgt${crosses ? " crossing" : ""}" data-goto="${r.exits[d]}"${crosses ? ` style="color:${spaceColor(spaceOf(t))}" title="Leads into another space — click to go there"` : ""}>${escapeHtml(tname)}</span>
       <button class="flytoggle${fly ? " on" : ""}" data-fly="${d}" title="Flight-only exit (requires flying)">✈</button>
       <button data-delexit="${d}">✕</button></div>`;
   }
@@ -228,7 +231,7 @@ export function renderInspector() {
   document.querySelectorAll("[data-fly]").forEach(b => b.onclick = () => { const d = b.dataset.fly; setExitFly(r.id, d, !(r.exitFly && r.exitFly[d])); commit(); render(); });
   document.querySelectorAll("[data-goto]").forEach(el => el.onclick = () => gotoRoom(el.dataset.goto));
   document.getElementById("delRoom").onclick = () => {
-    if (confirm(`Delete "${r.name}"? Exits referencing it will be removed. The cell is left empty.`)) { deleteRoom(r.id); commit(); render(); }
+    if (confirmDeleteRooms([r.id])) { deleteRoom(r.id); commit(); render(); }
   };
 }
 export function refreshRoomLabel(r) {
@@ -238,10 +241,9 @@ export function refreshRoomLabel(r) {
 export function gotoRoom(id) {
   const r = S.map.rooms[id];
   if (!r) return;
-  selectSingle(id);
   if (S.view !== "flat") { S.view = "flat"; updateViewButtons(); }
-  S.map.currentSpace = r.space || null;
-  S.map.currentLayer = r.z;
+  setSpace(r.space, r.z);   // announces the move if it crosses into another space
+  selectSingle(id);
   render();
   centerOnRoom(r);
 }
