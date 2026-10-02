@@ -13,6 +13,7 @@ import { updateViewButtons, applyInspectorCollapsed } from "./toolbar.js";
 import "./interactions.js";
 import "./preview.js";
 import "./export-import.js";
+import "./spaces-panel.js";
 import { applyUrlSync } from "./sync.js";
 import { updateLocationUI } from "./spaces.js";
 import { updateSearchInfo } from "./search-path.js";

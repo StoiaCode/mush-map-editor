@@ -339,7 +339,7 @@ select { cursor: pointer; }
 #toast {
   position: absolute; top: 14px; left: 50%; transform: translate(-50%, -8px); z-index: 30;
   padding: 7px 14px; border-radius: 6px; background: #11141a; border: 1px solid var(--line);
-  box-shadow: 0 6px 18px rgba(0,0,0,.6); font-size: 13px; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0,0,0,.6); font-size: 13px; max-width: min(560px, calc(100% - 32px)); text-align: center;
   opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -356,3 +356,22 @@ select { cursor: pointer; }
   #spaceTag { max-width: calc(100% - 20px); }
   #toast { white-space: normal; max-width: calc(100% - 32px); }
 }
+/* Spaces panel */
+#spacesPanel { width: 360px; max-height: calc(100vh - 80px); overflow-y: auto; }
+.spacerow { border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.spacerow.here { border-color: var(--accent); }
+.spacerow.orphan { border-color: var(--danger); }
+.spacerow-hdr { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.spacerow-hdr .sw { width: 16px; height: 16px; border-radius: 4px; flex: none; }
+.spacerow-hdr .sp-name { flex: 1; min-width: 0; font-weight: 700; }
+.spacerow-hdr .sp-title { flex: 1; }
+.spacerow-hdr .cnt { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.spacerow .swatches { margin-bottom: 6px; }
+.spacerow .swatch { width: 16px; height: 16px; }
+.sp-doors { margin-bottom: 6px; }
+.sp-doorhdr { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.sp-door { display: block; width: 100%; text-align: left; margin-bottom: 3px; padding: 3px 7px; font-size: 11px; white-space: normal; }
+.sp-orphan { color: var(--danger); font-size: 11px; line-height: 1.4; }
+.sp-actions { display: flex; gap: 6px; }
+.sp-actions button, .spacerow > .sp-enter { padding: 3px 9px; font-size: 11px; }
+.sp-enter.active:disabled { opacity: 1; background: transparent; color: var(--accent); border-color: transparent; }
