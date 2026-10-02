@@ -49,10 +49,13 @@ function unseen() {
   return i === -1 ? CHANGELOG : CHANGELOG.slice(0, i);
 }
 
-export function showChangelog(entries = CHANGELOG) {
+const MAX_POPUP = 3;   // more unseen than this: show the newest few and point at the rest
+
+export function showChangelog(entries = CHANGELOG, hidden = 0) {
   const box = document.getElementById("changelogModal");
   document.getElementById("changelogBody").innerHTML = entries.map(e =>
-    `<section class="cl-entry"><h4>${e.title} <span class="cl-date">${e.date}</span></h4>${e.html}</section>`).join("");
+    `<section class="cl-entry"><h4>${e.title} <span class="cl-date">${e.date}</span></h4>${e.html}</section>`).join("") +
+    (hidden ? `<p class="hint cl-more">…and ${hidden} older update${hidden !== 1 ? "s" : ""}. Read ${hidden !== 1 ? "them" : "it"} any time under <b>☰ Map ▾ → 📰 What's new</b>.</p>` : "");
   box.style.display = "flex";
   document.getElementById("changelogOk").focus();
 }
@@ -66,7 +69,7 @@ function closeChangelog() {
 export function initChangelog(hadMap) {
   if (!hadMap) { if (!readSeen()) markSeen(); return; }
   const fresh = unseen();
-  if (fresh.length) showChangelog(fresh.length > 3 ? fresh.slice(0, 3) : fresh);
+  if (fresh.length) showChangelog(fresh.slice(0, MAX_POPUP), Math.max(0, fresh.length - MAX_POPUP));
 }
 
 document.getElementById("changelogOk").onclick = closeChangelog;
