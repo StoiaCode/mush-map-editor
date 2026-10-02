@@ -25,7 +25,7 @@ html, body {
   padding: 8px 12px; background: var(--panel);
   border-bottom: 1px solid var(--line); flex-wrap: wrap;
 }
-#topbar .title { font-weight: 700; letter-spacing: .3px; margin-right: 6px; }
+#topbar .title { font-size: 18px; line-height: 1; margin-right: 4px; cursor: default; }
 #topbar .spacer { flex: 1; }
 button, select, input[type=text], textarea {
   font-family: inherit; font-size: 12px;
