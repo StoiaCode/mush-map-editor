@@ -5,6 +5,18 @@
 // latest entry again; that's fine for patch notes.
 export const CHANGELOG = [
   {
+    id: "2026-10-toolbar",
+    date: "2026-10-02",
+    title: "Toolbar cleanup",
+    html: `
+      <ul>
+        <li><b>☰ Map ▾</b> (top right): Export, Import, Sync, What's new, New map.</li>
+        <li><b>👁 View ▾</b>: Legend, Onion-skin, Stats.</li>
+        <li>Link, Path, Area and Transit are grouped together.</li>
+        <li>Zoom controls moved to the bottom-left corner of the map.</li>
+      </ul>`,
+  },
+  {
     id: "2026-10-spaces",
     date: "2026-10-02",
     title: "Spaces",
