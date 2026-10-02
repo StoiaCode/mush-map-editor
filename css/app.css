@@ -346,7 +346,8 @@ select { cursor: pointer; }
 #toast .tdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
 #app.in-space #toast { top: 52px; }
 /* door badges: the room leads into another space */
-.vbadge.doorbadge { top: 50%; right: -12px; transform: translateY(-50%); border-width: 2px; font-size: 10px; }
+/* top-centre: the corners hold trait/up/down/train badges, and names are vertically centred so the edge midpoint is clear */
+.vbadge.doorbadge { top: -10px; left: 50%; transform: translateX(-50%); border-width: 2px; font-size: 10px; }
 .vbadge.door { border-width: 2px; }
 .roomloc { margin: 8px 12px 0; padding: 4px 8px; border-left: 3px solid; background: var(--panel2); border-radius: 0 4px 4px 0; font-weight: 600; }
 .exitrow .tgt.crossing { font-weight: 700; }
