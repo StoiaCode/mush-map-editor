@@ -5,7 +5,7 @@ import { layersPresent } from "./model.js";
 import { render } from "./app.js";
 
 // ---------- Persistence ----------
-export function defaultMap() { return { version: 2, rooms: {}, areas: [], transitLines: [], traits: [], currentLayer: 0, tagLabels: emptyTagLabels() }; }
+export function defaultMap() { return { version: 3, rooms: {}, areas: [], spaces: [], transitLines: [], traits: [], currentSpace: null, currentLayer: 0, tagLabels: emptyTagLabels() }; }
 
 export function save() {
   if (S.previewMode) return;   // sandboxed preview map must never touch the real save slot
@@ -45,12 +45,25 @@ export function load() {
 export function normalize() {
   const map = S.map;
   if (!map.rooms) map.rooms = {};
+  // spaces (v3): drop malformed entries, then point every room/area at a space that exists
+  // (anything else falls back to the main map) and make sure we're viewing a real one
+  if (!Array.isArray(map.spaces)) map.spaces = [];
+  map.spaces = map.spaces.filter(sp => sp && typeof sp.id === "string");
+  for (const sp of map.spaces) {
+    if (typeof sp.name !== "string" || !sp.name.trim()) sp.name = "Unnamed space";
+    if (typeof sp.color !== "string") sp.color = "Purple";
+  }
+  const spaceIds = new Set(map.spaces.map(sp => sp.id));
+  const fixSpace = o => { o.space = (o.space && spaceIds.has(o.space)) ? o.space : null; };
+  if (!spaceIds.has(map.currentSpace)) map.currentSpace = null;
+  map.version = 3;
   if (!Array.isArray(map.areas)) map.areas = [];
   for (const a of map.areas) {
     if (!Array.isArray(a.rects) || !a.rects.length) {
       a.rects = [{ x: a.x || 0, y: a.y || 0, w: a.w || 1, h: a.h || 1 }];  // migrate legacy single-rect areas
     }
     delete a.x; delete a.y; delete a.w; delete a.h;
+    fixSpace(a);
   }
   if (!Array.isArray(map.transitLines)) map.transitLines = [];
   for (const line of map.transitLines) {
@@ -76,6 +89,7 @@ export function normalize() {
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);
     delete r.level;
+    fixSpace(r);
     if (!r.exits) r.exits = {};
     if (!r.exitFly) r.exitFly = {};   // directions on this room that require flight
     if (r.imageUrl == null) r.imageUrl = "";
@@ -109,6 +123,10 @@ function afterRestore() {
   if (S.selectedId && !map.rooms[S.selectedId]) S.selectedId = null;
   if (!S.selectedId && S.selection.size) S.selectedId = [...S.selection][0];
   if (S.selectedAreaId && !(map.areas || []).some(a => a.id === S.selectedAreaId)) S.selectedAreaId = null;
+  if (map.currentSpace && !(map.spaces || []).some(sp => sp.id === map.currentSpace)) map.currentSpace = null;
+  // the restored snapshot may be viewing a different space: never keep a selection you can't see
+  for (const id of [...S.selection]) if ((map.rooms[id].space || null) !== map.currentSpace) S.selection.delete(id);
+  if (S.selectedId && (map.rooms[S.selectedId].space || null) !== map.currentSpace) S.selectedId = S.selection.size ? [...S.selection][0] : null;
   const ls = layersPresent();
   if (!ls.includes(map.currentLayer)) map.currentLayer = ls[0];
   S.pendingLink = null;

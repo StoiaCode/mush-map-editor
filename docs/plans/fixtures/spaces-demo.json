@@ -1,0 +1,381 @@
+{
+ "version": 3,
+ "rooms": {
+  "st_w": {
+   "id": "st_w",
+   "name": "Street West",
+   "description": "",
+   "color": "Yellow",
+   "size": "medium",
+   "x": 2,
+   "y": 3,
+   "z": 0,
+   "space": null,
+   "exits": {
+    "E": "st_m"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "st_m": {
+   "id": "st_m",
+   "name": "Main St",
+   "description": "",
+   "color": "Yellow",
+   "size": "medium",
+   "x": 3,
+   "y": 3,
+   "z": 0,
+   "space": null,
+   "exits": {
+    "W": "st_w",
+    "E": "st_e",
+    "UP": "h_land"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "st_e": {
+   "id": "st_e",
+   "name": "Street East",
+   "description": "",
+   "color": "Yellow",
+   "size": "medium",
+   "x": 4,
+   "y": 3,
+   "z": 0,
+   "space": null,
+   "exits": {
+    "W": "st_m",
+    "E": "st_f",
+    "S": "alley2"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "st_f": {
+   "id": "st_f",
+   "name": "Far East St",
+   "description": "",
+   "color": "Yellow",
+   "size": "medium",
+   "x": 5,
+   "y": 3,
+   "z": 0,
+   "space": null,
+   "exits": {
+    "W": "st_e",
+    "UP": "t_stair"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "alley": {
+   "id": "alley",
+   "name": "Back Alley",
+   "description": "",
+   "color": "Orange",
+   "size": "medium",
+   "x": 4,
+   "y": 5,
+   "z": 0,
+   "space": null,
+   "exits": {
+    "N": "alley2",
+    "UP": "t_esc"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "alley2": {
+   "id": "alley2",
+   "name": "Alley Bend",
+   "description": "",
+   "color": "Orange",
+   "size": "medium",
+   "x": 4,
+   "y": 4,
+   "z": 0,
+   "space": null,
+   "exits": {
+    "N": "st_e",
+    "S": "alley"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "h_land": {
+   "id": "h_land",
+   "name": "Landing",
+   "description": "",
+   "color": "Purple",
+   "size": "medium",
+   "x": 500,
+   "y": 500,
+   "z": 0,
+   "space": "sp_highrise",
+   "exits": {
+    "DOWN": "st_m",
+    "E": "h_hall",
+    "UP": "h_land2"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "h_hall": {
+   "id": "h_hall",
+   "name": "Hallway",
+   "description": "",
+   "color": "Slate",
+   "size": "medium",
+   "x": 501,
+   "y": 500,
+   "z": 0,
+   "space": "sp_highrise",
+   "exits": {
+    "W": "h_land",
+    "N": "h_1a",
+    "S": "h_1b"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "h_1a": {
+   "id": "h_1a",
+   "name": "Apt 1A",
+   "description": "",
+   "color": "Blue",
+   "size": "medium",
+   "x": 501,
+   "y": 499,
+   "z": 0,
+   "space": "sp_highrise",
+   "exits": {
+    "S": "h_hall"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "h_1b": {
+   "id": "h_1b",
+   "name": "Apt 1B",
+   "description": "",
+   "color": "Blue",
+   "size": "medium",
+   "x": 501,
+   "y": 501,
+   "z": 0,
+   "space": "sp_highrise",
+   "exits": {
+    "N": "h_hall"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "h_land2": {
+   "id": "h_land2",
+   "name": "Landing 2",
+   "description": "",
+   "color": "Purple",
+   "size": "medium",
+   "x": 500,
+   "y": 500,
+   "z": 1,
+   "space": "sp_highrise",
+   "exits": {
+    "DOWN": "h_land",
+    "E": "h_2a"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "h_2a": {
+   "id": "h_2a",
+   "name": "Apt 2A",
+   "description": "",
+   "color": "Blue",
+   "size": "medium",
+   "x": 501,
+   "y": 500,
+   "z": 1,
+   "space": "sp_highrise",
+   "exits": {
+    "W": "h_land2"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "t_stair": {
+   "id": "t_stair",
+   "name": "Tower Stair",
+   "description": "",
+   "color": "Teal",
+   "size": "medium",
+   "x": 50,
+   "y": 50,
+   "z": 1,
+   "space": null,
+   "exits": {
+    "DOWN": "st_f",
+    "E": "t_room",
+    "UP": "t_top"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "t_room": {
+   "id": "t_room",
+   "name": "Tower Room",
+   "description": "",
+   "color": "Teal",
+   "size": "medium",
+   "x": 51,
+   "y": 50,
+   "z": 1,
+   "space": null,
+   "exits": {
+    "W": "t_stair",
+    "S": "t_esc"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "t_top": {
+   "id": "t_top",
+   "name": "Tower Top",
+   "description": "",
+   "color": "Teal",
+   "size": "medium",
+   "x": 50,
+   "y": 50,
+   "z": 2,
+   "space": null,
+   "exits": {
+    "DOWN": "t_stair"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "t_esc": {
+   "id": "t_esc",
+   "name": "Fire Escape",
+   "description": "",
+   "color": "Red",
+   "size": "medium",
+   "x": 51,
+   "y": 51,
+   "z": 1,
+   "space": null,
+   "exits": {
+    "N": "t_room",
+    "DOWN": "alley"
+   },
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "c_room": {
+   "id": "c_room",
+   "name": "Forgotten Cellar",
+   "description": "",
+   "color": "Red",
+   "size": "medium",
+   "x": 500,
+   "y": 500,
+   "z": 0,
+   "space": "sp_cellar",
+   "exits": {},
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  },
+  "main_500": {
+   "id": "main_500",
+   "name": "Main-map room at 500,500",
+   "description": "",
+   "color": "Green",
+   "size": "medium",
+   "x": 500,
+   "y": 500,
+   "z": 0,
+   "space": null,
+   "exits": {},
+   "exitFly": {},
+   "imageUrl": "",
+   "traits": []
+  }
+ },
+ "areas": [
+  {
+   "id": "a_street",
+   "name": "Downtown",
+   "color": "Yellow",
+   "space": null,
+   "rects": [
+    {
+     "x": 2,
+     "y": 3,
+     "w": 4,
+     "h": 1
+    }
+   ]
+  },
+  {
+   "id": "a_apts",
+   "name": "Apartments wing",
+   "color": "Blue",
+   "space": "sp_highrise",
+   "rects": [
+    {
+     "x": 501,
+     "y": 499,
+     "w": 1,
+     "h": 3
+    }
+   ]
+  }
+ ],
+ "spaces": [
+  {
+   "id": "sp_highrise",
+   "name": "Highrise Apts",
+   "color": "Purple"
+  },
+  {
+   "id": "sp_cellar",
+   "name": "Lost Cellar",
+   "color": "Red"
+  }
+ ],
+ "transitLines": [
+  {
+   "id": "l_tram",
+   "name": "Sky Tram",
+   "color": "Pink",
+   "loop": false,
+   "stations": [
+    "st_w",
+    "h_land2"
+   ]
+  }
+ ],
+ "traits": [],
+ "currentSpace": null,
+ "currentLayer": 0,
+ "tagLabels": {}
+}

@@ -1,7 +1,8 @@
 import { CELL, GRID_N, WORLD, SIZE_PX, COMPASS, VEC, OPP } from "./constants.js";
 import { S, viewport, world, svg, gridCanvas, ctx, layerLabel, zoomLabel } from "./state.js";
 import { colorOf, areaHex, hexA, escapeHtml, clamp } from "./utils.js";
-import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor, transitEdges } from "./model.js";
+import { roomsOnLayer, layersPresent, areaCells, areaLabelAnchor, stationLinesFor, transitEdges, areasInSpace, inSpace, curSpace, spaceOf } from "./model.js";
+import { spaceName } from "./spaces.js";
 import { save } from "./persistence.js";
 import { render } from "./app.js";
 import { loadRoomImage } from "./image-loader.js";
@@ -104,7 +105,7 @@ export function renderFlat() {
     </marker></defs>`;
 
   // areas: fill + outline on the SVG (behind connectors), shown on every layer; label + handle as DOM
-  for (const ar of S.map.areas) drawAreaFlat(ar);
+  for (const ar of areasInSpace()) drawAreaFlat(ar);
 
   // transit lines: dashed connector between consecutive stations, in the line's colour
   drawTransitLinesFlat(z);
@@ -121,14 +122,14 @@ export function renderFlat() {
     for (const dir of COMPASS) {
       const t = S.map.rooms[r.exits[dir]];
       if (!t) continue;
-      if (t.z === z) {
+      if (t.z === z && inSpace(t, curSpace())) {
         const key = [r.id, t.id].sort().join("|");
         if (!pairs.has(key)) pairs.set(key, []);
         pairs.get(key).push({ from: r, to: t, dir });
       } else {
         const a = roomWorldCenter(r);
         const [dx, dy] = VEC[dir];
-        drawStub(a.x, a.y, a.x + dx*CELL*0.7, a.y + dy*CELL*0.7, dir + "→L" + t.z);
+        drawStub(a.x, a.y, a.x + dx*CELL*0.7, a.y + dy*CELL*0.7, dir + "→" + offTarget(t));
       }
     }
   }
@@ -209,7 +210,8 @@ function drawTransitLinesFlat(z) {
     for (const [ridA, ridB] of transitEdges(line)) {
       const a = S.map.rooms[ridA], b = S.map.rooms[ridB];
       if (!a || !b) continue;
-      const onA = a.z === z, onB = b.z === z;
+      const here = curSpace();
+      const onA = a.z === z && inSpace(a, here), onB = b.z === z && inSpace(b, here);
       if (onA && onB) {
         const ca = roomWorldCenter(a), cb = roomWorldCenter(b);
         drawTransitConnector(ca.x, ca.y, cb.x, cb.y, c);
@@ -218,10 +220,15 @@ function drawTransitLinesFlat(z) {
         const cn = roomWorldCenter(near), cf = roomWorldCenter(far);
         const dx = cf.x - cn.x, dy = cf.y - cn.y;
         const len = Math.hypot(dx, dy) || 1, stubLen = CELL * 0.7;
-        drawTransitStub(cn.x, cn.y, cn.x + dx/len*stubLen, cn.y + dy/len*stubLen, "🚆 " + line.name + " →L" + far.z, c);
+        drawTransitStub(cn.x, cn.y, cn.x + dx/len*stubLen, cn.y + dy/len*stubLen, "🚆 " + line.name + " →" + offTarget(far), c);
       }
     }
   }
+}
+// Stub label for where an off-layer / off-space exit leads: "L2" on the same map,
+// or the other space's name when it leaves the one being viewed.
+function offTarget(t) {
+  return inSpace(t, curSpace()) ? "L" + t.z : spaceName(spaceOf(t));
 }
 function drawTransitConnector(x1, y1, x2, y2, color) {
   const ns = "http://www.w3.org/2000/svg";

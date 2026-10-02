@@ -4,7 +4,7 @@ import { clamp, escapeHtml, uid, areaHex } from "./utils.js";
 import {
   roomAtCell, createRoom, areaAtCell, mergeAreas, selectSingle, toggleSel,
   clearSelection, deleteRoom, carve, addExit, deleteArea, stationLinesFor, toggleStation,
-  isStub, entryName, bindSecondRoom
+  isStub, entryName, bindSecondRoom, inSpace, curSpace, spaceOf
 } from "./model.js";
 import { commit, undo, redo } from "./persistence.js";
 import { render } from "./app.js";
@@ -203,7 +203,8 @@ window.addEventListener("mouseup", e => {
     const a = screenToWorld(Math.min(e.clientX, d.x0), Math.min(e.clientY, d.y0));
     const b = screenToWorld(Math.max(e.clientX, d.x0), Math.max(e.clientY, d.y0));
     const allLayers = e.altKey;
-    const pool = allLayers ? Object.values(S.map.rooms) : Object.values(S.map.rooms).filter(r => r.z === S.map.currentLayer);
+    // "all layers" still means all layers of the space being viewed — never another space
+    const pool = Object.values(S.map.rooms).filter(r => inSpace(r, curSpace()) && (allLayers || r.z === S.map.currentLayer));
     const hits = pool.filter(r => {
       const c = roomWorldCenter(r);
       return c.x >= a.x && c.x <= b.x && c.y >= a.y && c.y <= b.y;
@@ -220,7 +221,7 @@ window.addEventListener("mouseup", e => {
     const b = screenToWorld(Math.max(e.clientX, d.x0), Math.max(e.clientY, d.y0));
     const x0 = clamp(Math.floor(a.x / CELL), 0, GRID_N-1), y0 = clamp(Math.floor(a.y / CELL), 0, GRID_N-1);
     const x1 = clamp(Math.floor(b.x / CELL), 0, GRID_N-1), y1 = clamp(Math.floor(b.y / CELL), 0, GRID_N-1);
-    const ar = { id: uid(), name: "Area", color: "Teal",
+    const ar = { id: uid(), name: "Area", color: "Teal", space: curSpace(),
                  rects: [{ x: Math.min(x0,x1), y: Math.min(y0,y1), w: Math.abs(x1-x0)+1, h: Math.abs(y1-y0)+1 }] };
     S.map.areas.push(ar); S.selectedAreaId = ar.id; clearSelection();
     commit(); render();
@@ -258,7 +259,7 @@ window.addEventListener("mouseup", e => {
     for (const id of d.ids) {
       const nx = d.starts[id].x + ddx, ny = d.starts[id].y + ddy;
       if (nx < 0 || ny < 0 || nx >= GRID_N || ny >= GRID_N) { ok = false; break; }
-      const occ = roomAtCell(S.map.rooms[id].z, nx, ny);
+      const occ = roomAtCell(S.map.rooms[id].z, nx, ny, spaceOf(S.map.rooms[id]));
       if (occ && !selSet.has(occ.id)) { ok = false; break; }
     }
     if (ok) {

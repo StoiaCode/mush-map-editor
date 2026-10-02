@@ -3,10 +3,11 @@
 // used to be reassigned from anywhere in the old single file lives as a property on
 // this one exported object instead. Modules do `S.map = x`, never `import { map }`.
 //
-// Room: { id, name, description, color, size, x, y, z, exits:{dir:targetId}, exitFly, imageUrl }
+// Room: { id, name, description, color, size, x, y, z, space, exits:{dir:targetId}, exitFly, imageUrl }
+//   space = null (main map) or a space id; x/y/z are local to that space (docs/plans/spaces.md).
 //   z = layer (true vertical axis). UP carve => same (x,y), z+1. DOWN => z-1.
 export const S = {
-  map: null,                // { version:2, rooms:{}, areas:[], currentLayer, tagLabels }
+  map: null,                // { version:3, rooms:{}, areas:[], spaces:[], currentSpace, currentLayer, tagLabels }
   selectedId: null,
   view: "flat",
   linkMode: false,

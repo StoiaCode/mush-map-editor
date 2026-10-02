@@ -19,22 +19,34 @@ export function toggleSel(id) {
 }
 export function clearSelection() { S.selection = new Set(); S.selectedId = null; }
 
+// ---------- Space helpers ----------
+// A space is a separate grid with its own layers (see docs/plans/spaces.md). Every room and
+// area belongs to exactly one: `space: null` is the main map, otherwise a space id. Exits are
+// id links and ignore spaces entirely; only positions (x, y, z) are local to a space.
+export function spaceOf(obj) { return (obj && obj.space) || null; }
+export function inSpace(obj, space) { return spaceOf(obj) === (space || null); }
+export function curSpace() { return S.map.currentSpace || null; }
+
 // ---------- Layer helpers ----------
-export function layersPresent() {
-  const zs = [...new Set(Object.values(S.map.rooms).map(r => r.z))];
+// All of these default to the space currently being viewed.
+export function layersPresent(space = curSpace()) {
+  const zs = [...new Set(Object.values(S.map.rooms).filter(r => inSpace(r, space)).map(r => r.z))];
   if (!zs.length) return [0];
   return zs.sort((a, b) => a - b);
 }
-export function roomsOnLayer(z) { return Object.values(S.map.rooms).filter(r => r.z === z); }
-export function roomAtCell(z, x, y) {
-  return Object.values(S.map.rooms).find(r => r.z === z && r.x === x && r.y === y) || null;
+export function roomsOnLayer(z, space = curSpace()) {
+  return Object.values(S.map.rooms).filter(r => r.z === z && inSpace(r, space));
+}
+export function roomAtCell(z, x, y, space = curSpace()) {
+  return Object.values(S.map.rooms).find(r => r.z === z && r.x === x && r.y === y && inSpace(r, space)) || null;
 }
 
 // ---------- Room operations ----------
-export function createRoom(z, x, y, name) {
+export function createRoom(z, x, y, name, space = curSpace()) {
   const id = uid();
   S.map.rooms[id] = { id, name: name || "New Room", description: "", color: "Slate",
-                      size: "medium", x, y, z, exits: {}, exitFly: {}, imageUrl: "", traits: [] };
+                      size: "medium", x, y, z, space: space || null,
+                      exits: {}, exitFly: {}, imageUrl: "", traits: [] };
   return S.map.rooms[id];
 }
 export function deleteRoom(id) {
@@ -55,7 +67,7 @@ export function changeRoomLayer(r, nz) {
   if (!Number.isFinite(nz)) { render(); return; }   // bad input → just re-sync the field
   nz = Math.round(nz);
   if (nz === r.z) return;
-  if (roomAtCell(nz, r.x, r.y)) {
+  if (roomAtCell(nz, r.x, r.y, spaceOf(r))) {
     alert(`A room already occupies cell (${r.x}, ${r.y}) on layer ${nz}. Move one of them first.`);
     render();   // reset the input back to the current value
     return;
@@ -106,8 +118,8 @@ export function carve(fromId, dir) {
   if (dir === "UP" || dir === "DOWN") {
     if (from.exits[dir]) { gotoRoom(from.exits[dir]); return; } // already linked: just travel
     const nz = from.z + (dir === "UP" ? 1 : -1);
-    let target = roomAtCell(nz, from.x, from.y);
-    if (!target) target = createRoom(nz, from.x, from.y, "New Room");
+    let target = roomAtCell(nz, from.x, from.y, spaceOf(from));
+    if (!target) target = createRoom(nz, from.x, from.y, "New Room", spaceOf(from));
     from.exits[dir] = target.id;
     target.exits[OPP[dir]] = from.id;
     selectSingle(target.id);
@@ -120,8 +132,8 @@ export function carve(fromId, dir) {
   const [dx, dy] = VEC[dir];
   const nx = clamp(from.x + dx, 0, GRID_N - 1);
   const ny = clamp(from.y + dy, 0, GRID_N - 1);
-  let target = roomAtCell(from.z, nx, ny);
-  if (!target) target = createRoom(from.z, nx, ny, "New Room");
+  let target = roomAtCell(from.z, nx, ny, spaceOf(from));
+  if (!target) target = createRoom(from.z, nx, ny, "New Room", spaceOf(from));
   from.exits[dir] = target.id;
   target.exits[OPP[dir]] = from.id;
   selectSingle(target.id);
@@ -129,7 +141,8 @@ export function carve(fromId, dir) {
 }
 // ---------- Area helpers ----------
 export function cellInRect(cx, cy, rc) { return cx >= rc.x && cx < rc.x + rc.w && cy >= rc.y && cy < rc.y + rc.h; }
-export function roomInArea(r, ar) { return ar.rects.some(rc => cellInRect(r.x, r.y, rc)); }
+export function roomInArea(r, ar) { return inSpace(r, spaceOf(ar)) && ar.rects.some(rc => cellInRect(r.x, r.y, rc)); }
+export function areasInSpace(space = curSpace()) { return S.map.areas.filter(a => inSpace(a, space)); }
 export function roomsInArea(ar) { return Object.values(S.map.rooms).filter(r => roomInArea(r, ar)).length; }
 export function areaCells(ar) {
   const s = new Set();
@@ -150,7 +163,7 @@ export function areaLabelAnchor(ar) {
   }
   return best || { x: 0, y: 0 };
 }
-export function areaAtCell(cx, cy) { return S.map.areas.find(a => a.rects.some(rc => cellInRect(cx, cy, rc))) || null; }
+export function areaAtCell(cx, cy) { return areasInSpace().find(a => a.rects.some(rc => cellInRect(cx, cy, rc))) || null; }
 export function mergeAreas(intoId, otherId) {
   const into = S.map.areas.find(a => a.id === intoId), other = S.map.areas.find(a => a.id === otherId);
   if (!into || !other || into === other) return;
@@ -162,7 +175,7 @@ export function splitArea(id) {
   const a = S.map.areas.find(x => x.id === id);
   if (!a || a.rects.length < 2) return;
   S.map.areas = S.map.areas.filter(x => x.id !== id);
-  a.rects.forEach((rc, i) => S.map.areas.push({ id: uid(), name: a.name + (i ? " " + (i + 1) : ""), color: a.color, rects: [{ ...rc }] }));
+  a.rects.forEach((rc, i) => S.map.areas.push({ id: uid(), name: a.name + (i ? " " + (i + 1) : ""), color: a.color, space: spaceOf(a), rects: [{ ...rc }] }));
   S.selectedAreaId = null;
 }
 

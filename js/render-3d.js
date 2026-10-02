@@ -1,7 +1,7 @@
 import { CELL, LAYER_GAP } from "./constants.js";
 import { S, view3dEl, ctx3d } from "./state.js";
 import { clamp, colorOf, areaHex, hexA } from "./utils.js";
-import { layersPresent, areaCells, selectSingle, clearSelection, transitEdges } from "./model.js";
+import { layersPresent, areaCells, selectSingle, clearSelection, transitEdges, areasInSpace, inSpace, curSpace } from "./model.js";
 import { render } from "./app.js";
 
 // ---------- 3D view (hand-rolled canvas: rotate → project → painter-sort) ----------
@@ -15,9 +15,11 @@ export function resize3d() {
 // Use the cell CENTRE (+CELL/2) to match the flat view and sit symmetrically inside
 // area slabs (which span cell edges). grid-Y is negated so the ground plane isn't
 // mirrored vs. the flat top-down map (canvas screen-Y points downward).
+// The 3D view shows one space at a time, same as the flat view.
+function rooms3d() { const sp = curSpace(); return Object.values(S.map.rooms).filter(r => inSpace(r, sp)); }
 export function room3dWorld(r) { return { x: r.x * CELL + CELL/2, y: -r.z * LAYER_GAP, z: -(r.y * CELL + CELL/2) }; }
 export function scene3dCentroid() {
-  const rooms = Object.values(S.map.rooms);
+  const rooms = rooms3d();
   if (!rooms.length) return { x: 0, y: 0, z: 0, radius: 1 };
   let sx = 0, sy = 0, sz = 0;
   for (const r of rooms) { const w = room3dWorld(r); sx += w.x; sy += w.y; sz += w.z; }
@@ -60,7 +62,7 @@ export function render3d() {
   if (!S.cam3d.fitted) fit3d();
   const W = view3dEl.width, H = view3dEl.height;
   ctx3d.clearRect(0, 0, W, H);
-  const rooms = Object.values(S.map.rooms);
+  const rooms = rooms3d();
   if (!rooms.length) {
     ctx3d.fillStyle = "#8a93a3"; ctx3d.font = "14px Segoe UI, sans-serif";
     ctx3d.textAlign = "center";
@@ -68,11 +70,12 @@ export function render3d() {
     S.proj3dCache = []; return;
   }
   // area slabs first (behind everything): translucent volumes spanning all layers
-  if (S.map.areas.length) {
+  const areas = areasInSpace();
+  if (areas.length) {
     const ls = layersPresent();
     const yTop = -(Math.max(...ls) + 0.6) * LAYER_GAP;
     const yBot = -(Math.min(...ls) - 0.6) * LAYER_GAP;
-    for (const ar of S.map.areas) drawAreaSlab3d(ar, yTop, yBot);
+    for (const ar of areas) drawAreaSlab3d(ar, yTop, yBot);
   }
 
   // project every room once
@@ -84,7 +87,7 @@ export function render3d() {
   for (const r of rooms) {
     for (const dir of ["N","NE","E","SE","S","SW","W","NW","UP","DOWN"]) {
       const t = S.map.rooms[r.exits[dir]];
-      if (!t) continue;
+      if (!t || !pr[t.id]) continue;   // missing, behind the camera, or in another space
       const key = [r.id, t.id].sort().join("|");
       const fly = !!(r.exitFly && r.exitFly[dir]);
       if (!pairs.has(key)) pairs.set(key, { a: r, b: t, vertical: (dir === "UP" || dir === "DOWN"), fly });

@@ -1,7 +1,8 @@
 import { PALETTE, DIRS } from "./constants.js";
 import { S } from "./state.js";
 import { escapeHtml, areaHex } from "./utils.js";
-import { roomsInArea, layersPresent, roomsOnLayer } from "./model.js";
+import { roomsInArea, layersPresent, roomsOnLayer, spaceOf } from "./model.js";
+import { spaceName, layerName } from "./spaces.js";
 import { save, commit } from "./persistence.js";
 import { render } from "./app.js";
 
@@ -44,12 +45,19 @@ export function buildLegend() {
 export function buildStats() {
   const el = document.getElementById("statsBody");
   const rooms = Object.values(S.map.rooms);
-  const layers = layersPresent();
   const cc = colorCounts();
   const plur = (n, w) => `<b>${n}</b> ${w}${n === 1 ? "" : "s"}`;
-  let h = `<div class="statline">${plur(rooms.length,"room")} · ${plur(S.map.areas.length,"area")} · ${plur(layers.length,"layer")} · ${plur(connectionCount(),"connection")}</div>`;
-  h += `<div class="stathdr">Rooms per layer</div>`;
-  for (const z of layers) h += `<div class="statrow"><span>Layer ${z}</span><span class="val">${roomsOnLayer(z).length}</span></div>`;
+  const nSpaces = S.map.spaces.length;
+  let h = `<div class="statline">${plur(rooms.length,"room")} · ${plur(S.map.areas.length,"area")}` +
+    (nSpaces ? ` · ${plur(nSpaces,"space")}` : ` · ${plur(layersPresent(null).length,"layer")}`) +
+    ` · ${plur(connectionCount(),"connection")}</div>`;
+  // per-layer counts, one block per space (main map first) so nothing is hidden by the current view
+  for (const sp of [null, ...S.map.spaces.map(x => x.id)]) {
+    const n = rooms.filter(r => spaceOf(r) === sp).length;
+    if (sp && !n) { h += `<div class="stathdr">${escapeHtml(spaceName(sp))}</div><div class="statrow"><span>(empty)</span><span class="val">0</span></div>`; continue; }
+    h += `<div class="stathdr">${nSpaces ? escapeHtml(spaceName(sp)) : "Rooms per layer"}</div>`;
+    for (const z of layersPresent(sp)) h += `<div class="statrow"><span>${escapeHtml(layerName(z, sp))}</span><span class="val">${roomsOnLayer(z, sp).length}</span></div>`;
+  }
   const tagged = PALETTE.filter(p => cc[p.name] > 0);
   if (tagged.length) {
     h += `<div class="stathdr">By colour tag</div>`;

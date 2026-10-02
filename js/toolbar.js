@@ -318,7 +318,7 @@ document.getElementById("zoomReset").onclick = () => {
   }
   S.scale = 1;
   const sel = S.selectedId && S.map.rooms[S.selectedId];
-  if (sel && sel.z === S.map.currentLayer) centerOnRoom(sel);
+  if (sel && sel.z === S.map.currentLayer && (sel.space || null) === (S.map.currentSpace || null)) centerOnRoom(sel);
   else { const rooms = roomsOnLayer(S.map.currentLayer); rooms.length ? centerOnRoom(rooms[0]) : centerCellView(GRID_N/2, GRID_N/2); }
 };
 

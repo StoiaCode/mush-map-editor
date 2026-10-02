@@ -1,7 +1,8 @@
 import { DIRS, GRID_N } from "./constants.js";
 import { S } from "./state.js";
 import { uid, clamp, escapeHtml } from "./utils.js";
-import { roomInArea, roomsInArea, layersPresent, roomsOnLayer, clearSelection } from "./model.js";
+import { roomInArea, roomsInArea, layersPresent, roomsOnLayer, clearSelection, spaceOf } from "./model.js";
+import { spaceName, layerName } from "./spaces.js";
 import { commit, resetHistory, save, defaultMap } from "./persistence.js";
 import { render } from "./app.js";
 import { centerOnRoom, centerCellView } from "./render-flat.js";
@@ -16,13 +17,15 @@ export function downloadJSON(obj, filename) {
   a.download = filename;
   a.click(); URL.revokeObjectURL(a.href);
 }
+// Layers are per space, so the export checklist keys them as "spaceId|z" ("" = main map).
+const layerKey = (space, z) => (space || "") + "|" + z;
 export function exportSelection() {
-  // layers: checked ids; areas: checked ids (empty = no area restriction)
-  const layers = new Set([...document.querySelectorAll("#expLayers input:checked")].map(c => parseInt(c.value, 10)));
+  // layers: checked space|z keys; areas: checked ids (empty = no area restriction)
+  const layers = new Set([...document.querySelectorAll("#expLayers input:checked")].map(c => c.value));
   const areaIds = new Set([...document.querySelectorAll("#expAreas input:checked")].map(c => c.value));
   const chosenAreas = S.map.areas.filter(a => areaIds.has(a.id));
   const rooms = Object.values(S.map.rooms).filter(r => {
-    if (!layers.has(r.z)) return false;
+    if (!layers.has(layerKey(spaceOf(r), r.z))) return false;
     if (chosenAreas.length && !chosenAreas.some(a => roomInArea(r, a))) return false;
     return true;
   });
@@ -30,11 +33,17 @@ export function exportSelection() {
 }
 export function buildExportPanel() {
   const lay = document.getElementById("expLayers");
-  lay.innerHTML = layersPresent().map(z =>
-    `<label><input type="checkbox" value="${z}" checked> Layer ${z}<span class="cnt">${roomsOnLayer(z).length}</span></label>`).join("");
+  const spaces = [null, ...S.map.spaces.map(sp => sp.id)];
+  const multi = S.map.spaces.length > 0;
+  lay.innerHTML = spaces.flatMap(sp => {
+    const zs = layersPresent(sp).filter(z => roomsOnLayer(z, sp).length || (!sp && !multi));
+    return zs.map(z => `<label><input type="checkbox" value="${escapeHtml(layerKey(sp, z))}" checked> ` +
+      (multi ? escapeHtml(spaceName(sp)) + " · " : "") + escapeHtml(layerName(z, sp)) +
+      `<span class="cnt">${roomsOnLayer(z, sp).length}</span></label>`);
+  }).join("");
   const ar = document.getElementById("expAreas");
   ar.innerHTML = S.map.areas.length
-    ? S.map.areas.map(a => `<label><input type="checkbox" value="${a.id}"> ${escapeHtml(a.name)}<span class="cnt">${roomsInArea(a)}</span></label>`).join("")
+    ? S.map.areas.map(a => `<label><input type="checkbox" value="${a.id}"> ${multi ? escapeHtml(spaceName(spaceOf(a))) + " · " : ""}${escapeHtml(a.name)}<span class="cnt">${roomsInArea(a)}</span></label>`).join("")
     : `<div class="hint">No areas defined.</div>`;
   lay.querySelectorAll("input").forEach(c => c.onchange = updateExportCount);
   ar.querySelectorAll("input").forEach(c => c.onchange = updateExportCount);
@@ -79,14 +88,18 @@ export function doExport() {
       return e;   // stub
     }).filter(Boolean) }))
     .filter(l => l.stations.length >= 2);
-  const zs = rooms.map(r => r.z);
+  const usedSpaces = new Set(rooms.map(spaceOf));
+  const outSpaces = S.map.spaces.filter(sp => usedSpaces.has(sp.id)).map(sp => ({ ...sp }));
+  // open on the main map if it has any exported rooms, otherwise on the first exported space
+  const startSpace = usedSpaces.has(null) ? null : spaceOf(rooms[0]);
+  const zs = rooms.filter(r => spaceOf(r) === startSpace).map(r => r.z);
   const title = document.getElementById("expTitle").value.trim();
   const author = document.getElementById("expAuthor").value.trim();
   const out = {
-    version: 2, partial: true,
+    version: 3, partial: true,
     meta: { title, author, date: new Date().toISOString().slice(0, 10), rooms: rooms.length },
-    rooms: outRooms, areas: outAreas, transitLines: outLines, tagLabels: S.map.tagLabels, traits: S.map.traits,
-    currentLayer: Math.min(...zs)
+    rooms: outRooms, areas: outAreas, spaces: outSpaces, transitLines: outLines, tagLabels: S.map.tagLabels, traits: S.map.traits,
+    currentSpace: startSpace, currentLayer: Math.min(...zs)
   };
   const slug = (title || "mush-map-partial").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   downloadJSON(out, (slug || "mush-map-partial") + "-" + out.meta.date + ".json");
@@ -128,13 +141,25 @@ export function mergeImport(data) {
     traitIdMap[t.id] = nt.id;
     S.map.traits.push(nt);
   }
-  // find a uniform cell shift so imported rooms don't overlap existing ones
-  const occ = new Set(Object.values(S.map.rooms).map(r => r.z + ":" + r.x + ":" + r.y));
-  const collides = (dx, dy) => src.some(r => occ.has(r.z + ":" + (r.x + dx) + ":" + (r.y + dy)));
+  // imported spaces always become new spaces (fresh ids), so only main-map rooms can collide
+  // with what's already here; space rooms keep their own coordinates untouched
+  const spaceIdMap = {};
+  for (const sp of (data.spaces || [])) {
+    if (!sp || typeof sp.id !== "string") continue;
+    const nsp = { id: uid(), name: sp.name || "Unnamed space", color: sp.color || "Purple" };
+    spaceIdMap[sp.id] = nsp.id;
+    S.map.spaces.push(nsp);
+  }
+  const newSpace = o => (o && o.space && spaceIdMap[o.space]) || null;
+  const srcMain = src.filter(r => !newSpace(r));
+  // find a uniform cell shift so imported main-map rooms don't overlap existing ones
+  const mainRooms = Object.values(S.map.rooms).filter(r => !r.space);
+  const occ = new Set(mainRooms.map(r => r.z + ":" + r.x + ":" + r.y));
+  const collides = (dx, dy) => srcMain.some(r => occ.has(r.z + ":" + (r.x + dx) + ":" + (r.y + dy)));
   let dx = 0, dy = 0;
   if (collides(0, 0)) {
-    const maxX = Math.max(0, ...Object.values(S.map.rooms).map(r => r.x));
-    const minX = Math.min(...src.map(r => r.x));
+    const maxX = Math.max(0, ...mainRooms.map(r => r.x));
+    const minX = Math.min(...srcMain.map(r => r.x));
     dx = maxX + 2 - minX;
     let guard = 0;
     while (collides(dx, dy) && guard++ < GRID_N) dx++;   // scan east until clear
@@ -143,9 +168,10 @@ export function mergeImport(data) {
   const newIds = [];
   for (const r of src) {
     const nid = idMap[r.id];
+    const sp = newSpace(r), sx = sp ? 0 : dx, sy = sp ? 0 : dy;
     const nr = { id: nid, name: r.name || "New Room", description: r.description || "",
       color: r.color || "Slate", size: r.size || "medium", imageUrl: r.imageUrl || "",
-      x: clampX(r.x + dx), y: clampY(r.y + dy), z: r.z, exits: {}, exitFly: {},
+      x: clampX(r.x + sx), y: clampY(r.y + sy), z: r.z, space: sp, exits: {}, exitFly: {},
       traits: Array.isArray(r.traits) ? r.traits.map(id => traitIdMap[id]).filter(Boolean) : [] };
     for (const d of DIRS) {
       const t = r.exits && r.exits[d];
@@ -155,8 +181,9 @@ export function mergeImport(data) {
   }
   for (const a of (data.areas || [])) {
     const rects = (Array.isArray(a.rects) && a.rects.length) ? a.rects : [{ x: a.x, y: a.y, w: a.w, h: a.h }];  // accept new or legacy
-    S.map.areas.push({ id: uid(), name: a.name, color: a.color,
-      rects: rects.map(rc => ({ x: clampX(rc.x + dx), y: clampY(rc.y + dy), w: rc.w, h: rc.h })) });
+    const sp = newSpace(a), sx = sp ? 0 : dx, sy = sp ? 0 : dy;
+    S.map.areas.push({ id: uid(), name: a.name, color: a.color, space: sp,
+      rects: rects.map(rc => ({ x: clampX(rc.x + sx), y: clampY(rc.y + sy), w: rc.w, h: rc.h })) });
   }
   for (const line of (data.transitLines || [])) {
     const stations = (line.stations || []).map(e => {
@@ -169,10 +196,15 @@ export function mergeImport(data) {
     }).filter(Boolean);
     if (stations.length) S.map.transitLines.push({ id: uid(), name: line.name, color: line.color, stations, loop: !!line.loop });
   }
-  S.selection = new Set(newIds);
-  S.selectedId = newIds[0];
-  S.map.currentLayer = S.map.rooms[newIds[0]].z;
-  commit(); render(); centerOnRoom(S.map.rooms[newIds[0]]);
+  // select the imported rooms in whichever space we land on (selection never spans spaces):
+  // the main map if anything landed there, else the first imported space
+  const first = S.map.rooms[newIds.find(id => !S.map.rooms[id].space) || newIds[0]];
+  const landed = newIds.filter(id => (S.map.rooms[id].space || null) === (first.space || null));
+  S.selection = new Set(landed);
+  S.selectedId = first.id;
+  S.map.currentSpace = first.space || null;
+  S.map.currentLayer = first.z;
+  commit(); render(); centerOnRoom(first);
 }
 document.getElementById("newMapBtn").onclick = () => {
   if (!confirm("Start a new empty map? This clears the current map (export first if you want a backup).")) return;

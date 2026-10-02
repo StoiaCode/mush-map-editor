@@ -240,6 +240,7 @@ export function gotoRoom(id) {
   if (!r) return;
   selectSingle(id);
   if (S.view !== "flat") { S.view = "flat"; updateViewButtons(); }
+  S.map.currentSpace = r.space || null;
   S.map.currentLayer = r.z;
   render();
   centerOnRoom(r);
