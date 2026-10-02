@@ -149,8 +149,10 @@ function afterRestore(wasSpace, verb) {
   if (hint) hint.style.display = "none";
   S.pathStart = null; S.pathRooms = new Set();
   save(); render(); updateUndoButtons();
-  // an undo/redo that lands in a different space must say so, or the map seems to jump at random
-  if ((map.currentSpace || null) !== wasSpace) { S.cam3d.fitted = false; announceLocation(verb); }
+  // always say where the undo/redo happened: rooms can appear or vanish (e.g. a move between
+  // spaces), and when it lands in a different space the map would otherwise seem to jump at random
+  if ((map.currentSpace || null) !== wasSpace) S.cam3d.fitted = false;
+  announceLocation(verb);
 }
 export function updateUndoButtons() {
   const u = document.getElementById("undoBtn"), r = document.getElementById("redoBtn");

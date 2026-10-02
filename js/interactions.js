@@ -14,6 +14,7 @@ import { clearPath, setPathHint, computePath } from "./search-path.js";
 import { setBindPick } from "./toolbar.js";
 import { confirmDeleteRooms, roomLocation, shortLayerName } from "./spaces.js";
 import { captureClick, cancelCapture } from "./capture.js";
+import { releaseDrop, cancelRelease } from "./release.js";
 
 // ---------- Pointer interactions ----------
 const CLICK_THRESH = 4;
@@ -38,7 +39,7 @@ viewport.addEventListener("mousedown", e => {
   // Capture preview: a room click toggles it in/out of the move; empty space still pans.
   if (S.capture) {
     const capEl = e.target.closest(".room:not(.ghost)");
-    if (capEl) { captureClick(capEl.dataset.id); e.preventDefault(); return; }
+    if (capEl && S.capture.kind !== "release") { captureClick(capEl.dataset.id); e.preventDefault(); return; }
     S.drag = { type:"pan", x0:e.clientX, y0:e.clientY, px:S.panX, py:S.panY, moved:false };
     viewport.classList.add("panning"); e.preventDefault(); return;
   }
@@ -200,6 +201,7 @@ window.addEventListener("mouseup", e => {
   const d = S.drag; S.drag = null; viewport.classList.remove("panning");
   if (d.type === "pan") {
     if (!d.moved) {
+      if (S.capture && S.capture.kind === "release") { releaseDrop(e); return; }   // click (not drag) drops the rooms here
       if (S.linkMode) { if (S.pendingLink) setPending(null); return; } // empty click cancels pending link
       if (S.pathMode) { if (S.pathStart) { S.pathStart = null; setPathHint(); render(); } return; }
       // plain click on empty space just clears the selection (double-click to create a room)
@@ -423,7 +425,7 @@ window.addEventListener("keydown", e => {
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   // While the capture preview is open the map is read-only: Esc cancels, nothing else edits.
-  if (S.capture) { if (e.key === "Escape") cancelCapture(); return; }
+  if (S.capture) { if (e.key === "Escape") (S.capture.kind === "release" ? cancelRelease : cancelCapture)(); return; }
   // Undo / redo (global, works with or without a selection)
   if (e.ctrlKey || e.metaKey) {
     const k = e.key.toLowerCase();

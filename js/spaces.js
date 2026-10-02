@@ -51,10 +51,13 @@ export function crossExits(r) {
 
 // Floors are numbered relative to the space's first door (docs/plans/spaces.md, Decisions):
 // the room you enter by going UP from outside is Floor +1, by a compass exit Floor 0.
-// Returns the z offset to add to a raw layer, or null when there's no door to anchor on.
+// Doors from the main map count first, so linking a neighbouring space later can't renumber a
+// building that hangs off the street. Returns the z offset to add to a raw layer, or null when
+// there's no door to anchor on.
 export function floorOffset(spaceId) {
   if (!spaceId) return null;
-  const d = doorsOf(spaceId).find(d => d.entering);
+  const entering = doorsOf(spaceId).filter(d => d.entering);
+  const d = entering.find(d => !spaceOf(d.outside)) || entering[0];
   if (!d) return null;
   const dz = d.dir === "UP" ? 1 : d.dir === "DOWN" ? -1 : 0;
   return dz - d.inside.z;

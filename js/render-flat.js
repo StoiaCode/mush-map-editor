@@ -7,6 +7,7 @@ import { save } from "./persistence.js";
 import { render } from "./app.js";
 import { loadRoomImage } from "./image-loader.js";
 import { captureClass } from "./capture.js";
+import { drawReleaseGhost } from "./release.js";
 
 // ---------- Layer navigation ----------
 export function setLayer(z) {
@@ -158,10 +159,11 @@ export function renderFlat() {
     for (const ex of exits) drawDirLabel(ex.from, ex.to, ex.dir, frac);
   }
 
-  if (S.capture) drawCaptureDoors(z);
+  if (S.capture && S.capture.kind !== "release") drawCaptureDoors(z);
 
   // --- current layer rooms (solid, on top) ---
   for (const r of roomsOnLayer(z)) world.appendChild(makeRoomEl(r, false));
+  drawReleaseGhost();
 }
 
 // Capture preview: every exit that will become a door of the new space, in red — a line when

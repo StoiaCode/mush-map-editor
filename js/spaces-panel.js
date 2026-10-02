@@ -8,6 +8,7 @@ import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
 import { centerCellView } from "./render-flat.js";
 import { GRID_N } from "./constants.js";
+import { startRelease } from "./release.js";
 import { MAIN_NAME, doorsOf, roomsInSpace, roomLocation, setSpace, spaceColor, toast } from "./spaces.js";
 
 // ---------- Spaces panel ----------
@@ -54,7 +55,8 @@ export function buildSpacesPanel() {
   body.appendChild(main);
 
   const rows = S.map.spaces.map(sp => ({ sp, doors: doorPairs(sp.id), n: roomsInSpace(sp.id).length }));
-  rows.sort((a, b) => (a.doors.length ? 1 : 0) - (b.doors.length ? 1 : 0));   // orphans first, otherwise keep creation order
+  const orphan = row => row.n > 0 && !row.doors.length;
+  rows.sort((a, b) => (orphan(b) ? 1 : 0) - (orphan(a) ? 1 : 0));   // orphans first, otherwise keep creation order
   if (!rows.length) {
     const none = document.createElement("div");
     none.className = "hint"; none.style.margin = "8px 0";
@@ -63,7 +65,7 @@ export function buildSpacesPanel() {
   }
   for (const { sp, doors, n } of rows) {
     const row = document.createElement("div");
-    row.className = "spacerow" + (here === sp.id ? " here" : "") + (doors.length ? "" : " orphan");
+    row.className = "spacerow" + (here === sp.id ? " here" : "") + (n && !doors.length ? " orphan" : "");
     const floors = n ? layersPresent(sp.id).length : 0;
     const head = document.createElement("div");
     head.className = "spacerow-hdr";
@@ -88,7 +90,9 @@ export function buildSpacesPanel() {
 
     const dl = document.createElement("div");
     dl.className = "sp-doors";
-    if (!doors.length) {
+    if (!n) {
+      dl.innerHTML = `<div class="hint">Empty: no rooms in here. Delete it, or enter it and add rooms.</div>`;
+    } else if (!doors.length) {
       dl.innerHTML = `<div class="sp-orphan">⚠ Orphaned: no door connects this space to anything. Its rooms are safe; enter it and link one of them to give it a door again.</div>`;
     } else {
       dl.innerHTML = `<div class="sp-doorhdr">Door${doors.length !== 1 ? "s" : ""}</div>`;
@@ -105,6 +109,13 @@ export function buildSpacesPanel() {
     const acts = document.createElement("div");
     acts.className = "sp-actions";
     acts.appendChild(enterBtn(sp.id, here === sp.id));
+    if (n) {
+      const rel = document.createElement("button");
+      rel.textContent = "↩ Move all to main map…";
+      rel.title = "Place this space's rooms back onto the main map (you pick the spot first; one undo step)";
+      rel.onclick = () => { closePanel(); startRelease(roomsInSpace(sp.id).map(r => r.id)); };
+      acts.appendChild(rel);
+    }
     const del = document.createElement("button");
     del.className = "danger"; del.textContent = "Delete space";
     del.disabled = n > 0;

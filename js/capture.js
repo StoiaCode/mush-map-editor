@@ -131,7 +131,7 @@ export function captureClick(id) {
 // How a room looks in the preview (render-flat.js adds these classes).
 export function captureClass(r) {
   const c = S.capture;
-  if (!c || spaceOf(r) !== c.source) return "";
+  if (!c || c.kind === "release" || spaceOf(r) !== c.source) return "";
   if (r.id === c.anchorId) return " cap-anchor";
   if (c.excluded && c.excluded.has(r.id)) return " cap-excluded";
   if (c.ids.has(r.id)) return " cap-in" + (c.leakPath && c.leakPath.includes(r.id) ? " cap-leak" : "");

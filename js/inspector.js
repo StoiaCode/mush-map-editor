@@ -12,6 +12,7 @@ import { updateViewButtons } from "./toolbar.js";
 import { setSpace, roomLocation, confirmDeleteRooms, spaceColor, shortLayerName } from "./spaces.js";
 import { spaceOf } from "./model.js";
 import { startDoorCapture, startSelectionCapture } from "./capture.js";
+import { startRelease } from "./release.js";
 
 // ---------- Inspector ----------
 export function renderInspector() {
@@ -85,6 +86,7 @@ export function renderInspector() {
         </select></div></div>` +
       `<div class="insec">
         <button id="bulk_capture" style="width:100%;margin-bottom:6px;" title="Preview moving exactly these rooms into a separate pocket space">⧉ Move ${S.selection.size} rooms into a space…</button>
+        ${S.map.currentSpace ? `<button id="bulk_release" style="width:100%;margin-bottom:6px;" title="Place these rooms back onto the main map (you pick the spot first)">↩ Move ${S.selection.size} rooms to the main map…</button>` : ""}
         <button id="bulk_clear" style="width:100%;margin-bottom:6px;">Clear selection</button>
         <button class="danger" id="bulk_del" style="width:100%">Delete ${S.selection.size} rooms</button>
       </div>` +
@@ -104,6 +106,8 @@ export function renderInspector() {
     };
     document.getElementById("bulk_clear").onclick = () => { clearSelection(); render(); };
     document.getElementById("bulk_capture").onclick = () => startSelectionCapture([...S.selection]);
+    const relBtn = document.getElementById("bulk_release");
+    if (relBtn) relBtn.onclick = () => startRelease([...S.selection]);
     document.getElementById("bulk_del").onclick = () => {
       if (confirmDeleteRooms([...S.selection])) { for (const id of [...S.selection]) deleteRoom(id); clearSelection(); commit(); render(); }
     };

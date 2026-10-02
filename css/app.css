@@ -401,3 +401,13 @@ select { cursor: pointer; }
   content: "✕"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 34px; color: #e25555; font-weight: 700; pointer-events: none;
 }
+/* Release placement ghost */
+.rel-ghost {
+  position: absolute; transform: translate(-50%, -50%); pointer-events: none; z-index: 6;
+  border-radius: 8px; border: 2px dashed #fff; opacity: .75;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  font-size: 10px; color: #11141a; overflow: hidden; padding: 2px;
+}
+.rel-ghost.bad { border-color: #e25555; box-shadow: 0 0 0 4px rgba(226,85,85,.7); background-image: repeating-linear-gradient(45deg, rgba(226,85,85,.55) 0 6px, transparent 6px 12px); }
+#captureBanner .rel-z { display: inline-block; padding: 0 6px; border-radius: 4px; background: var(--panel2); }
+#captureBanner .rel-z.bad { color: #ff8a8a; border: 1px solid rgba(226,85,85,.6); }
