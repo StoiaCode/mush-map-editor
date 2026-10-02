@@ -412,3 +412,20 @@ select { cursor: pointer; }
 .rel-ghost.bad { border-color: #e25555; box-shadow: 0 0 0 4px rgba(226,85,85,.7); background-image: repeating-linear-gradient(45deg, rgba(226,85,85,.55) 0 6px, transparent 6px 12px); }
 #captureBanner .rel-z { display: inline-block; padding: 0 6px; border-radius: 4px; background: var(--panel2); }
 #captureBanner .rel-z.bad { color: #ff8a8a; border: 1px solid rgba(226,85,85,.6); }
+/* What's new popup */
+#changelogModal {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55);
+  align-items: center; justify-content: center; padding: 16px;
+}
+#changelogModal .cl-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.7); width: min(560px, 100%); max-height: calc(100vh - 32px);
+  display: flex; flex-direction: column; padding: 14px 16px;
+}
+#changelogBody { overflow-y: auto; line-height: 1.5; font-size: 13px; padding-right: 4px; }
+#changelogBody h4 { margin: 4px 0 6px; font-size: 15px; }
+#changelogBody .cl-date { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 6px; }
+#changelogBody p { margin: 6px 0; }
+#changelogBody ul { margin: 4px 0 8px; padding-left: 20px; }
+#changelogBody .cl-entry + .cl-entry { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+#changelogModal .cl-ok { align-self: flex-end; margin-top: 10px; padding: 6px 18px; background: var(--accent2); border-color: var(--accent); color: #fff; font-weight: 700; }

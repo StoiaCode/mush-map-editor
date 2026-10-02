@@ -74,6 +74,7 @@
 
     <span class="spacer"></span>
     <span class="statuschip" id="saveStatus"></span>
+    <button id="whatsNewBtn" title="What's new in the editor">📰 What's new</button>
     <button id="exportBtn">⬇ Export</button>
     <button id="importBtn">⬆ Import</button>
     <input type="file" id="importFile" accept="application/json" style="display:none">
@@ -205,6 +206,14 @@
 </div>
 
 <div id="marquee"></div>
+
+<div id="changelogModal" style="display:none">
+  <div class="cl-card" role="dialog" aria-labelledby="changelogTitle">
+    <div class="pop-hdr" id="changelogTitle">📰 What's new</div>
+    <div id="changelogBody"></div>
+    <button id="changelogOk" class="cl-ok">Got it</button>
+  </div>
+</div>
 
 <script type="module" src="js/app.js"></script>
 </body>

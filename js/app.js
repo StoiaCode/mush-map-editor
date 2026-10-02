@@ -17,6 +17,8 @@ import "./spaces-panel.js";
 import { applyUrlSync } from "./sync.js";
 import { updateLocationUI } from "./spaces.js";
 import { updateSearchInfo } from "./search-path.js";
+import { initChangelog } from "./changelog.js";
+import { STORE_KEY } from "./constants.js";
 
 // ---------- Render dispatcher ----------
 // Central so every other module can trigger a redraw via one import, instead of
@@ -46,6 +48,8 @@ window.addEventListener("resize", () => {
   if (S.view === "3d") { resize3d(); render3d(); }
 });
 
+// checked before load(), which falls back to an empty map: did this browser have a map already?
+const hadMap = (() => { try { return !!(localStorage.getItem(STORE_KEY) || localStorage.getItem("mushMapEditor.v1")); } catch (e) { return false; } })();
 load();
 loadPrefs();
 resetHistory();
@@ -55,3 +59,4 @@ updateViewButtons();
 render();
 fitInitial();
 applyUrlSync();
+initChangelog(hadMap);
