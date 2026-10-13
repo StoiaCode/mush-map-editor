@@ -52,10 +52,17 @@ async function load(url) {
 }
 
 // Queues a room image load behind the concurrency limit; resolves with a src ready to
-// assign to `el.style.backgroundImage`. Safe to call repeatedly for the same URL.
+// assign to `el.style.backgroundImage`. Safe to call repeatedly for the same URL: every
+// render() asks again for every tile's image, and the live link renders on each move, so a
+// load still in flight is shared rather than queued again behind copies of itself.
+const pending = new Map();    // remote url -> promise of a load that's queued or running
 export function loadRoomImage(url) {
   if (resolved.has(url)) return Promise.resolve(resolved.get(url));
-  return new Promise(resolve => { queue.push({ url, resolve }); pump(); });
+  if (pending.has(url)) return pending.get(url);
+  const p = new Promise(resolve => { queue.push({ url, resolve }); pump(); })
+    .finally(() => pending.delete(url));
+  pending.set(url, p);
+  return p;
 }
 
 export async function clearImageCache() {
