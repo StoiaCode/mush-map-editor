@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.2.0
+// @version      1.3.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -28,6 +28,8 @@
 //                {seq, kind:'room', room}        what the side panel shows (see readRoom), sent
 //                                                once it has caught up with the move
 //                {seq, kind:'goto', q}           "//goto <q>" typed in PbN (never sent to the game)
+//                {seq, kind:'sys', text}         a refused move: "You can't go that way.",
+//                                                "You are moving too quickly. Slow down." and the like
 //   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
 //   mm_ping / mm_pong {id}                   is a PbN tab there?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
@@ -37,7 +39,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -77,6 +79,7 @@
         lastEvt = ev.seq;
         if (ev.kind === 'room') toPage('room', { room: ev.room });
         else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q }); }
+        else if (ev.kind === 'sys') toPage('sys', { text: ev.text });
         else toPage('move', { dir: ev.dir, name: ev.name });
       }
     });
@@ -99,6 +102,8 @@
     const MOVE_RE = /^You move (.+?) to (.+?)\.?$/;
     // On connect: "[LOCATION] You are in Le Cafe de Rien - Coffee Bar"
     const YOU_ARE_IN_RE = /^You are in (.+?)\.?$/;
+    // Confirmed: "You can't go that way." / "You are moving too quickly. Slow down."
+    const REFUSED_RE = /^You (?:can't|cannot|can not|are moving too quickly)\b/i;
 
     const tabId = Math.random().toString(36).slice(2);
     const isActive = () => GM_getValue('mm_active') === tabId;
@@ -143,6 +148,7 @@
         reportRoom(name);
         return;
       }
+      if (text && REFUSED_RE.test(text)) { push({ kind: 'sys', text }); return; }
       const loc = getLocationText(article);
       const here = loc && YOU_ARE_IN_RE.exec(loc);
       if (here) reportRoom(here[1].trim());
@@ -305,6 +311,8 @@
 
     // A [MAPPER] line in the chat, in this page only: the server never sees it and nobody else
     // does either. Copies the scoped-style attribute from a real message so it looks the same.
+    // It goes right after the last message, not at the very end: Vue inserts new messages before
+    // its own end marker, so a line appended past that marker would stay stuck at the bottom.
     function localLine(lines) {
       const container = document.querySelector(CHAT_SELECTOR);
       if (!container) return;
@@ -317,14 +325,15 @@
       if (last) for (const a of last.attributes) if (a.name.startsWith('data-v-')) row.setAttribute(a.name, '');
       const p = document.createElement('p');
       const tag = document.createElement('span');
-      tag.className = 'text-orange-9 text-weight-bold';
+      tag.className = 'text-weight-bold';
+      tag.style.color = '#5b9dff';   // the mapper's own accent blue
       tag.textContent = '[MAPPER]';
       p.append(tag, ' ');
       lines.forEach((line, i) => { if (i) p.append(document.createElement('br')); p.append(line); });
       row.appendChild(p);
       seen.add(row);
       const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 60;
-      container.appendChild(row);
+      if (last) last.after(row); else container.appendChild(row);
       if (atBottom) container.scrollTop = container.scrollHeight;
     }
     GM_addValueChangeListener('mm_cmd', (key, oldV, v) => {

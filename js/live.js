@@ -17,6 +17,7 @@ import { computePath, findPath } from "./search-path.js";
 //                  {mm:"bridge", type:"client"}              the MUSH tab answered a ping
 //                  {mm:"bridge", type:"move", dir, name}     MUSH printed "You move <dir> to <name>."
 //                  {mm:"bridge", type:"goto", q}             "//goto <q>" typed in the PbN client
+//                  {mm:"bridge", type:"sys", text}           the game refused a move ("You can't go that way.")
 //                  {mm:"bridge", type:"room", room}          the side panel caught up: {name, description,
 //                                                            image, exits:{N:{name,locked,aerial}}, grid:{N:name}}
 //   page → bridge  {mm:"page", type:"probe"}                 ask for a hello
@@ -28,9 +29,11 @@ import { computePath, findPath } from "./search-path.js";
 // Position: follow the reported direction along the map's exits. The direction is what the game
 // actually did, the room name is only a cross-check, since mapped names can be stale.
 //
-// Walking: the game only queues 5 moves, so keep at most L.window commands in flight and top up
-// as each "You move" arrives. Stop on a direction that isn't the next step (locked door, manual
-// move, wrong start) or when nothing has moved for L.stallSec.
+// Walking: the game takes a chain of up to 5 directions as ONE input ("north north east") and
+// refuses inputs sent while you're still moving ("You are moving too quickly"). So send a chain of
+// L.window steps, wait until every "You move" of it has arrived, then send the next. Stop on a
+// direction that isn't the next step (manual move, wrong start), on "You can't go that way" and the
+// like, or when nothing has moved for L.stallSec. "Too quickly" resends the rest of the chain.
 
 const LIVE_KEY = "mushMapEditor.live.v1";
 const CLIENT_STALE_MS = 15000;   // the bridge pings every 5s
@@ -40,7 +43,7 @@ const L = {
   bridge: false,      // userscript answered on this page
   clientAt: 0,        // last time the MUSH tab answered a ping
   follow: true,       // keep the view on your position
-  window: 5,          // max commands queued in the game at once
+  window: 5,          // directions per input chain (the game's limit is 5)
   stallSec: 20,       // give up a walk after this long without a move
   seenName: null,     // name the MUSH gave for the current room, when it differs from the map's
   snap: null,         // last room snapshot from the side panel (bridge "room" message)
@@ -59,7 +62,7 @@ function loadLive() {
     const o = JSON.parse(localStorage.getItem(LIVE_KEY) || "{}");
     S.here = o.here || null;
     L.follow = o.follow !== false;
-    L.window = clamp(parseInt(o.window, 10) || 5, 1, 20);
+    L.window = clamp(parseInt(o.window, 10) || 5, 1, 5);
     L.stallSec = clamp(parseInt(o.stallSec, 10) || 20, 5, 300);
   } catch (e) { /* private window etc: defaults are fine */ }
 }
@@ -211,6 +214,7 @@ function onMove(word, name) {
       stopWalk(`Expected <b>${DIRWORD[exp.dir]}</b> but you moved <b>${escapeHtml(word)}</b>.`);
     } else {
       W.done++; W.lastMove = Date.now();
+      if (W.done > W.sent) W.sent = W.done;   // it walked a step we'd taken back after "too quickly"
       setHere(exp.toId, name);   // the route's room is the mapped exit we meant to take
       if (W.done === W.steps.length) finishWalk(); else pump();
       updateChip();
@@ -240,7 +244,7 @@ export function startWalk(res, fromGame = false) {
   if (!steps.length) { toast(note || "Nothing to walk."); return; }
   if (!clientAlive()) { toast("📡 No MUSH tab answering. Open (or click into) the MUSH client tab first."); return; }
   setHere(res.rooms[0]);   // you start the walk at the route's start
-  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null, fromGame };
+  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null, fromGame, retries: 0 };
   W.timer = setInterval(() => {
     if (W && W.sent > W.done && Date.now() - W.lastMove > L.stallSec * 1000)
       stopWalk(`No movement for ${L.stallSec}s (locked door, blocked, or you stopped?).`);
@@ -248,16 +252,37 @@ export function startWalk(res, fromGame = false) {
   pump();
   updateChip(); refreshLivePanel();
 }
-function pump() {
-  const n = Math.min(L.window - (W.sent - W.done), W.steps.length - W.sent);
-  if (n <= 0) return;
-  post("send", { cmds: W.steps.slice(W.sent, W.sent + n).map(s => DIRWORD[s.dir]) });
-  W.sent += n;
+// Next chain, once the previous one has fully arrived. A short pause first: sent the instant the
+// last move lands, the game may still count you as moving.
+const CHAIN_GAP_MS = 300;
+function pump(delay = W.sent ? CHAIN_GAP_MS : 0) {
+  if (W.sent > W.done || W.sent >= W.steps.length || W.pending) return;
+  W.pending = setTimeout(() => {
+    if (!W) return;
+    W.pending = null;
+    const n = Math.min(L.window, W.steps.length - W.sent);
+    post("send", { cmds: [W.steps.slice(W.sent, W.sent + n).map(s => DIRWORD[s.dir]).join(" ")] });
+    W.sent += n;
+    W.lastMove = Date.now();   // the stall clock starts when the chain goes out
+  }, delay);
+}
+// The game refused something. "Too quickly" means the chain wasn't taken: send what's left of it
+// again after a pause. Anything else ("You can't go that way.") ends the walk right away.
+function onSys(text) {
+  if (!W || W.sent === W.done) return;
+  if (/moving too quickly/i.test(text) && W.retries < 2) {
+    W.retries++;
+    W.sent = W.done;
+    clearTimeout(W.pending); W.pending = null;
+    pump(1500);
+    return;
+  }
+  stopWalk(`The game said: “${escapeHtml(text)}”`);
 }
 function finishWalk() {
   const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
   const note = W.note, fromGame = W.fromGame;
-  clearInterval(W.timer); W = null;
+  clearInterval(W.timer); clearTimeout(W.pending); W = null;
   toast(`🏁 Arrived at <b>${escapeHtml(dest ? dest.name : "?")}</b>.` + (note ? " " + note : ""));
   if (fromGame) reply(`Arrived at ${dest ? dest.name : "?"}.` + (note ? " " + plain(note) : ""));
   walkEnded();
@@ -265,11 +290,11 @@ function finishWalk() {
 // why = null: replaced by a new walk, say nothing.
 export function stopWalk(why) {
   if (!W) return;
-  const queued = W.sent - W.done, left = W.steps.length - W.done, fromGame = W.fromGame;
-  clearInterval(W.timer); W = null;
+  const queued = Math.max(0, W.sent - W.done), left = W.steps.length - W.done, fromGame = W.fromGame;
+  clearInterval(W.timer); clearTimeout(W.pending); W = null;
   if (why !== null) {
     const msg = `Walk stopped. ${why || ""} ${left} step${left !== 1 ? "s" : ""} left` +
-      (queued ? `, up to ${queued} still queued in the game.` : ".");
+      (queued ? `, up to ${queued} more may still be walked from the last input.` : ".");
     toast("⏹ " + msg);
     if (fromGame) reply(plain(msg));
   }
@@ -409,7 +434,7 @@ function buildLivePanel() {
       <label class="liveswitch"><input type="checkbox" id="liveFollow"${L.follow ? " checked" : ""}><span></span></label>
     </div>
     <div class="livesetting">
-      <div><div>Queue size</div><div class="livesub">Moves sent ahead at once</div></div>
+      <div><div>Steps per input</div><div class="livesub">Sent as one line, e.g. “north north east”</div></div>
       ${stepper("liveWindow", L.window, "")}
     </div>
     <div class="livesetting">
@@ -425,7 +450,7 @@ function buildLivePanel() {
   on("liveStop", "onclick", () => stopWalk("Stopped by you."));
   on("liveFollow", "onchange", e => { L.follow = e.target.checked; saveLive(); if (L.follow && r) followTo(r); });
   on("liveForget", "onclick", () => setHere(null));
-  wireStepper("liveWindow", v => { L.window = clamp(v, 1, 20); saveLive(); return L.window; });
+  wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
 }
 // − value +  (the stall timeout steps by 5s above 10s)
@@ -521,6 +546,8 @@ window.addEventListener("message", e => {
     onRoom(m.room);
   } else if (m.type === "goto") {
     onGoto(m.q);
+  } else if (m.type === "sys") {
+    onSys(String(m.text || ""));
   }
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
