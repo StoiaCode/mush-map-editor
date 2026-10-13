@@ -8,7 +8,7 @@ import { centerOnRoom, roomWorldCenter } from "./render-flat.js";
 import { setSpace, toast, roomLocation } from "./spaces.js";
 import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
-import { computePath } from "./search-path.js";
+import { computePath, findPath } from "./search-path.js";
 
 // ---------- Live link to the MUSH web client ----------
 // The MUSH client is another site, so this page can't touch it. The bridge userscript
@@ -16,10 +16,12 @@ import { computePath } from "./search-path.js";
 //   bridge → page  {mm:"bridge", type:"hello"}               userscript is installed
 //                  {mm:"bridge", type:"client"}              the MUSH tab answered a ping
 //                  {mm:"bridge", type:"move", dir, name}     MUSH printed "You move <dir> to <name>."
+//                  {mm:"bridge", type:"goto", q}             "//goto <q>" typed in the PbN client
 //                  {mm:"bridge", type:"room", room}          the side panel caught up: {name, description,
 //                                                            image, exits:{N:{name,locked,aerial}}, grid:{N:name}}
 //   page → bridge  {mm:"page", type:"probe"}                 ask for a hello
 //                  {mm:"page", type:"send", cmds:[...]}      type these into the MUSH client
+//                  {mm:"page", type:"reply", lines:[...]}    show as a local [MAPPER] line in PbN's chat
 // All the logic (where you are, what to send next) lives here so it updates with the site;
 // the userscript only moves messages around.
 //
@@ -44,6 +46,7 @@ const L = {
   snap: null,         // last room snapshot from the side panel (bridge "room" message)
   bridgeV: null,      // version the installed bridge reported
   latestV: null,      // @version of the bridge file this site serves
+  gotoList: [],       // room ids of the last numbered //goto list, for "//goto 2"
 };
 let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
 
@@ -225,7 +228,7 @@ function onMove(word, name) {
 
 // ---------- Walking a route ----------
 // res is a findPath() result. Walks the leading walk steps; a train leg ends the walk with a note.
-export function startWalk(res) {
+export function startWalk(res, fromGame = false) {
   if (W) stopWalk(null);
   const steps = [];
   let note = null;
@@ -237,7 +240,7 @@ export function startWalk(res) {
   if (!steps.length) { toast(note || "Nothing to walk."); return; }
   if (!clientAlive()) { toast("📡 No MUSH tab answering. Open (or click into) the MUSH client tab first."); return; }
   setHere(res.rooms[0]);   // you start the walk at the route's start
-  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null };
+  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null, fromGame };
   W.timer = setInterval(() => {
     if (W && W.sent > W.done && Date.now() - W.lastMove > L.stallSec * 1000)
       stopWalk(`No movement for ${L.stallSec}s (locked door, blocked, or you stopped?).`);
@@ -253,19 +256,22 @@ function pump() {
 }
 function finishWalk() {
   const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
-  const note = W.note;
+  const note = W.note, fromGame = W.fromGame;
   clearInterval(W.timer); W = null;
   toast(`🏁 Arrived at <b>${escapeHtml(dest ? dest.name : "?")}</b>.` + (note ? " " + note : ""));
+  if (fromGame) reply(`Arrived at ${dest ? dest.name : "?"}.` + (note ? " " + plain(note) : ""));
   walkEnded();
 }
 // why = null: replaced by a new walk, say nothing.
 export function stopWalk(why) {
   if (!W) return;
-  const queued = W.sent - W.done, left = W.steps.length - W.done;
+  const queued = W.sent - W.done, left = W.steps.length - W.done, fromGame = W.fromGame;
   clearInterval(W.timer); W = null;
   if (why !== null) {
-    toast(`⏹ Walk stopped. ${why || ""} ${left} step${left !== 1 ? "s" : ""} left` +
-      (queued ? `, up to ${queued} still queued in the game.` : "."));
+    const msg = `Walk stopped. ${why || ""} ${left} step${left !== 1 ? "s" : ""} left` +
+      (queued ? `, up to ${queued} still queued in the game.` : ".");
+    toast("⏹ " + msg);
+    if (fromGame) reply(plain(msg));
   }
   walkEnded();
 }
@@ -275,6 +281,70 @@ function walkEnded() {
   const box = document.getElementById("pathResult");
   if (S.pathLast && box.style.display === "block" && document.getElementById("pathStop"))
     computePath(S.pathLast.startId, S.pathLast.endId);
+}
+
+// ---------- //goto from the PbN client ----------
+// "//goto cafe bar" walks to the room whose name holds every word typed. Several matches come back
+// as a numbered list ("//goto 2" picks one), so even identical names can be told apart.
+// "//goto stop" stops a walk, a bare "//goto" says where the mapper thinks you are.
+function reply(...lines) { post("reply", { lines }); }
+const plain = html => String(html).replace(/<[^>]+>/g, "");
+const fold = s => (s || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+function matchRooms(q) {
+  const all = Object.values(S.map.rooms);
+  const exact = all.filter(r => fold(r.name) === fold(q));
+  if (exact.length) return exact;
+  const words = fold(q).split(" ");
+  return all.filter(r => { const n = fold(r.name); return words.every(w => n.includes(w)); });
+}
+// walk-only first, trains only when there's no other way (same rule as the route box)
+function routeTo(fromId, toId) {
+  return findPath(fromId, toId, S.pathCanFly, false) || findPath(fromId, toId, S.pathCanFly, true);
+}
+function gotoRoomFromGame(target) {
+  const here = hereRoom();
+  if (!here) return reply("I don't know where you are yet. Move once, or press 📍 I'm here in the mapper.");
+  if (here.id === target.id) return reply(`You're already in ${target.name}.`);
+  const res = routeTo(here.id, target.id);
+  if (!res) return reply(`No ${S.pathCanFly ? "" : "ground "}route from ${here.name} to ${target.name} on your map.`);
+  if (res.steps[0].type === "train") return reply(`The route starts with a train: board the ${res.steps[0].lineName} here.`);
+  const walkSteps = res.steps.findIndex(s => s.type === "train");
+  computePath(here.id, target.id);   // show it in the mapper too
+  startWalk(res, true);
+  if (!W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
+  reply(`Walking to ${target.name}: ${walkSteps < 0 ? res.steps.length : walkSteps} steps` +
+    (walkSteps < 0 ? "." : `, then a train (it stops there).`) + " //goto stop to stop.");
+}
+function onGoto(q) {
+  if (!S.map) return;
+  q = String(q || "").trim();
+  if (!q) {
+    const r = hereRoom();
+    return reply(r ? `You are in ${r.name} (${roomLocation(r)}).` : "I don't know where you are yet.");
+  }
+  if (/^stop$/i.test(q)) {
+    if (!W) return reply("Not walking.");
+    return stopWalk("Stopped from the game.");
+  }
+  if (/^\d+$/.test(q) && L.gotoList.length) {
+    const r = S.map.rooms[L.gotoList[parseInt(q, 10) - 1]];
+    return r ? gotoRoomFromGame(r) : reply(`Pick a number from 1 to ${L.gotoList.length}.`);
+  }
+  const hits = matchRooms(q);
+  if (!hits.length) return reply(`Nothing on your map matches "${q}".`);
+  if (hits.length === 1) return gotoRoomFromGame(hits[0]);
+  // several: nearest first, with where they are and how far, so duplicates can be told apart
+  const here = hereRoom();
+  const rows = hits.map(r => {
+    const res = here ? routeTo(here.id, r.id) : null;
+    return { r, steps: res ? res.steps.length : (here && here.id === r.id ? 0 : Infinity) };
+  }).sort((a, b) => a.steps - b.steps || a.r.name.localeCompare(b.r.name));
+  const shown = rows.slice(0, 8);
+  L.gotoList = shown.map(x => x.r.id);
+  reply(`${hits.length} rooms match "${q}":`,
+    ...shown.map((x, i) => `${i + 1}. ${x.r.name} · ${roomLocation(x.r)}` +
+      (x.steps === Infinity ? (here ? " · no route" : "") : x.steps === 0 ? " · you are here" : ` · ${x.steps} step${x.steps !== 1 ? "s" : ""}`)),
+    (hits.length > shown.length ? `…and ${hits.length - shown.length} more. ` : "") + "Type //goto <number> to pick one, or be more specific.");
 }
 
 // ---------- Toolbar chip + panel ----------
@@ -449,6 +519,8 @@ window.addEventListener("message", e => {
     onMove(String(m.dir || ""), String(m.name || ""));
   } else if (m.type === "room" && S.map) {
     onRoom(m.room);
+  } else if (m.type === "goto") {
+    onGoto(m.q);
   }
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab

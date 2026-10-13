@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.1.0
+// @version      1.2.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -27,13 +27,17 @@
 //                {seq, kind:'move', dir, name}   "You move <dir> to <name>.", sent at once
 //                {seq, kind:'room', room}        what the side panel shows (see readRoom), sent
 //                                                once it has caught up with the move
+//                {seq, kind:'goto', q}           "//goto <q>" typed in PbN (never sent to the game)
+//   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
 //   mm_ping / mm_pong {id}                   is a PbN tab there?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
 //                                            tab (an alt, say) neither doubles commands nor reports moves
+//   mm_mapper  tab id                        likewise only the most recently used mapper tab answers
+//                                            //goto, so two open mappers don't both start a walk
 (function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -54,16 +58,25 @@
       if (m.type === 'probe') hello();
       else if (m.type === 'send' && Array.isArray(m.cmds)) {
         GM_setValue('mm_cmd', { seq: nextSeq(), cmds: m.cmds.map(String).slice(0, 20) });
+      } else if (m.type === 'reply' && Array.isArray(m.lines)) {
+        GM_setValue('mm_reply', { seq: nextSeq(), lines: m.lines.map(String).slice(0, 15) });
       }
     });
 
     // only moves that happen after this page opened
+    const tabId = Math.random().toString(36).slice(2);
+    const claim = () => GM_setValue('mm_mapper', tabId);
+    claim();
+    window.addEventListener('focus', claim);
+    document.addEventListener('mousedown', claim, true);
+
     let lastEvt = ((GM_getValue('mm_evt') || {}).events || []).reduce((a, ev) => Math.max(a, ev.seq), 0);
     GM_addValueChangeListener('mm_evt', (key, oldV, v) => {
       for (const ev of (v && v.events) || []) {
         if (ev.seq <= lastEvt) continue;
         lastEvt = ev.seq;
         if (ev.kind === 'room') toPage('room', { room: ev.room });
+        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q }); }
         else toPage('move', { dir: ev.dir, name: ev.name });
       }
     });
@@ -251,9 +264,69 @@
       });
     }
 
+    let mapperSeen = 0;   // mapper tabs ping every 5s
     GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
+      mapperSeen = Date.now();
       if (isActive()) GM_setValue('mm_pong', { id: v && v.id });
     });
+    GM_addValueChangeListener('mm_reply', (key, oldV, v) => {
+      if (isActive() && v && Array.isArray(v.lines)) localLine(v.lines);
+    });
+
+    // --- //goto: caught before the game's own Enter handler, never sent to the server ---
+    const GOTO_RE = /^\/\/goto(?:\s+([\s\S]*))?$/i;
+    let swallowEnter = false;
+    window.addEventListener('keydown', e => {
+      if (!onPlay || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+      const input = e.target;
+      if (!input || input.tagName !== 'TEXTAREA' || input !== findInput()) return;
+      const m = GOTO_RE.exec(input.value.trim());
+      if (!m) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      swallowEnter = true;
+      setNativeValue(input, '');
+      claim();
+      if (Date.now() - mapperSeen > 15000) {
+        localLine(["MUSH Mapper isn't open. Open map.stoia.red in another tab, then try again."]);
+        return;
+      }
+      push({ kind: 'goto', q: (m[1] || '').trim() });
+    }, true);
+    // the same Enter's keypress/keyup must not reach the game either
+    for (const type of ['keypress', 'keyup']) {
+      window.addEventListener(type, e => {
+        if (swallowEnter && e.key === 'Enter') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          if (type === 'keyup') swallowEnter = false;
+        }
+      }, true);
+    }
+
+    // A [MAPPER] line in the chat, in this page only: the server never sees it and nobody else
+    // does either. Copies the scoped-style attribute from a real message so it looks the same.
+    function localLine(lines) {
+      const container = document.querySelector(CHAT_SELECTOR);
+      if (!container) return;
+      const rows = container.querySelectorAll(ARTICLE_SELECTOR);
+      const last = rows[rows.length - 1];
+      const row = document.createElement('div');
+      row.className = 'q-pa-xs chat-message-row';
+      row.setAttribute('role', 'article');
+      row.dataset.mmLocal = '1';
+      if (last) for (const a of last.attributes) if (a.name.startsWith('data-v-')) row.setAttribute(a.name, '');
+      const p = document.createElement('p');
+      const tag = document.createElement('span');
+      tag.className = 'text-orange-9 text-weight-bold';
+      tag.textContent = '[MAPPER]';
+      p.append(tag, ' ');
+      lines.forEach((line, i) => { if (i) p.append(document.createElement('br')); p.append(line); });
+      row.appendChild(p);
+      seen.add(row);
+      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 60;
+      container.appendChild(row);
+      if (atBottom) container.scrollTop = container.scrollHeight;
+    }
     GM_addValueChangeListener('mm_cmd', (key, oldV, v) => {
       if (isActive() && v && Array.isArray(v.cmds)) sendLines(v.cmds);
     });
