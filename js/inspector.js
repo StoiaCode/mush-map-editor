@@ -125,6 +125,11 @@ export function renderInspector() {
 
   const r = S.map.rooms[S.selectedId];
   let h = `<h3>Room</h3><div class="roomloc" style="border-color:${spaceColor(spaceOf(r))}">📍 ${escapeHtml(roomLocation(r))}</div>`;
+  // set only by auto-map (live.js), so maps that never used it never show this
+  if (r.auto) {
+    h += `<div class="autonote">🤖 Auto-created from the game, might be wrong.
+      <button id="f_verified" title="Checked it: drop the auto-created marking">✓ Verified</button></div>`;
+  }
   h += `<div class="insec insec-info">
     <div class="field"><label>Name</label><input type="text" id="f_name" value="${escapeAttr(r.name)}"></div>
     <div class="field field-grow"><label>Description / notes</label><textarea id="f_desc">${escapeHtml(r.description)}</textarea></div>
@@ -250,6 +255,8 @@ export function renderInspector() {
     }
   };
   document.getElementById("f_img").onchange = () => commit();
+  const verBtn = document.getElementById("f_verified");
+  if (verBtn) verBtn.onclick = () => { delete r.auto; commit(); render(); };
   const hereBtn = document.getElementById("f_here");
   if (hereBtn) hereBtn.onclick = () => setHere(r.id);
   const routeBtn = document.getElementById("f_route");

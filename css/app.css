@@ -489,3 +489,8 @@ select { cursor: pointer; }
   background: #2a6b45; border: 1px solid #3ddc84; color: #fff; font-weight: 700;
   border-radius: 5px; padding: 5px 9px; text-decoration: none;
 }
+/* auto-mapped rooms (live.js) until marked verified */
+.room.autoroom { border: 2px dashed #e8c93a; }
+.autonote { margin: 0 0 8px; padding: 6px 8px; border: 1px dashed #e8c93a; border-radius: 6px;
+  color: #e8c93a; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+.autonote button { margin-left: auto; padding: 2px 8px; font-size: 11px; flex: none; }

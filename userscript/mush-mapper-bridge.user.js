@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.0.0
+// @version      1.1.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -23,14 +23,17 @@
 //            types commands into the command box when asked.
 // Shared storage keys:
 //   mm_cmd     {seq, cmds}                   mapper → client: commands to type
-//   mm_evt     {events:[{seq, dir, name}]}   client → mapper: recent moves, newest last
+//   mm_evt     {events:[...]}                client → mapper, newest last:
+//                {seq, kind:'move', dir, name}   "You move <dir> to <name>.", sent at once
+//                {seq, kind:'room', room}        what the side panel shows (see readRoom), sent
+//                                                once it has caught up with the move
 //   mm_ping / mm_pong {id}                   is a PbN tab there?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
 //                                            tab (an alt, say) neither doubles commands nor reports moves
 (function () {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -60,7 +63,8 @@
       for (const ev of (v && v.events) || []) {
         if (ev.seq <= lastEvt) continue;
         lastEvt = ev.seq;
-        toPage('move', { dir: ev.dir, name: ev.name });
+        if (ev.kind === 'room') toPage('room', { room: ev.room });
+        else toPage('move', { dir: ev.dir, name: ev.name });
       }
     });
 
@@ -80,6 +84,8 @@
     const ARTICLE_SELECTOR = '[role="article"]';
     // Confirmed: "[SYSTEM] You move northeast to Cuthbert Street Alley."
     const MOVE_RE = /^You move (.+?) to (.+?)\.?$/;
+    // On connect: "[LOCATION] You are in Le Cafe de Rien - Coffee Bar"
+    const YOU_ARE_IN_RE = /^You are in (.+?)\.?$/;
 
     const tabId = Math.random().toString(36).slice(2);
     const isActive = () => GM_getValue('mm_active') === tabId;
@@ -96,17 +102,99 @@
       return full.replace(/^\[SYSTEM\]\s*/, '');
     }
 
+    function getLocationText(article) {
+      const p = article.querySelector('p');
+      const tagSpan = p && p.querySelector('span.text-teal-8.text-weight-bold');
+      if (!tagSpan || tagSpan.textContent.trim() !== '[LOCATION]') return null;
+      return (p.textContent || '').replace(/\s+/g, ' ').trim().replace(/^\[LOCATION\]\s*/, '');
+    }
+
     const events = [];
+    function push(ev) {
+      if (!isActive()) return;
+      ev.seq = nextSeq();
+      events.push(ev);
+      while (events.length > 20) events.shift();
+      GM_setValue('mm_evt', { events: events.slice() });
+    }
+
     const seen = new WeakSet();
     function processArticle(article) {
       if (seen.has(article)) return;
       seen.add(article);
       const text = getSystemText(article);
       const m = text && MOVE_RE.exec(text);
-      if (!m || !isActive()) return;
-      events.push({ seq: nextSeq(), dir: m[1].trim(), name: m[2].trim() });
-      while (events.length > 20) events.shift();
-      GM_setValue('mm_evt', { events: events.slice() });
+      if (m) {
+        const name = m[2].trim();
+        push({ kind: 'move', dir: m[1].trim(), name });
+        reportRoom(name);
+        return;
+      }
+      const loc = getLocationText(article);
+      const here = loc && YOU_ARE_IN_RE.exec(loc);
+      if (here) reportRoom(here[1].trim());
+    }
+
+    // --- reading the side panel ---
+    // Exits come from the site's own compass and .vertical-exit-btn (Compass Tools only hides the
+    // latter with CSS), always via aria-label: Compass Tools' title tooltips can be stale.
+    //   "Go west to John F. Kennedy Boulevard"   "Go north to Gallery Upper Offices (locked)"
+    //   "Go north (aerial)" (flight exits never name their destination)   "Go up (locked)"
+    const DIR_KEYS = {
+      north: 'N', northeast: 'NE', east: 'E', southeast: 'SE',
+      south: 'S', southwest: 'SW', west: 'W', northwest: 'NW', up: 'UP', down: 'DOWN',
+    };
+    const EXIT_RE = /^Go (\w+)(?: to (.+?))?(?: \((locked|aerial)\))?$/;
+    const GRID_RE = /^(\w+): (.+)$/;
+
+    function readRoom() {
+      const nameEl = document.querySelector('.info-tab .room-name');
+      if (!nameEl) return null;
+      const name = nameEl.textContent.trim();
+      // The image wrapper names its room, so an image still fading out from the last room
+      // can't be mistaken for this one's.
+      const wrap = document.querySelector('.room-image');
+      const imgOk = !!wrap && wrap.getAttribute('aria-label') === 'Room image: ' + name;
+      const img = imgOk ? wrap.querySelector('img.q-img__image') : null;
+      const descEl = document.querySelector('.info-tab .room-description');
+      const exits = {};
+      document.querySelectorAll('.compass .compass__cell, .vertical-exits .vertical-exit-btn').forEach(el => {
+        const m = EXIT_RE.exec((el.getAttribute('aria-label') || '').trim());
+        const dir = m && DIR_KEYS[m[1].toLowerCase()];
+        if (dir) exits[dir] = { name: m[2] ? m[2].trim() : null, locked: m[3] === 'locked', aerial: m[3] === 'aerial' };
+      });
+      // The mini-map shows which rooms sit next to this one on the game's grid, walkable or not.
+      const grid = {};
+      document.querySelectorAll('.mini-map .mini-map__cell--room').forEach(el => {
+        const m = GRID_RE.exec((el.getAttribute('aria-label') || '').trim());
+        const dir = m && DIR_KEYS[m[1].toLowerCase()];
+        if (dir) grid[dir] = m[2].trim();
+      });
+      return {
+        name,
+        description: descEl ? descEl.textContent.trim() : '',
+        image: img ? (img.getAttribute('src') || '') : '',
+        imageReady: imgOk || !wrap,
+        exits, grid,
+      };
+    }
+
+    // The chat line and the panel update at roughly the same time, in either order: poll briefly
+    // until the panel shows the room we expect. A newer move cancels an older wait.
+    let roomToken = 0;
+    async function reportRoom(expectName) {
+      const token = ++roomToken;
+      await tick(100);
+      let snap = null;
+      for (let i = 0; i < 30; i++) {
+        if (token !== roomToken) return;
+        snap = readRoom();
+        if (snap && (!expectName || snap.name === expectName) && snap.imageReady) break;
+        await tick(50);
+      }
+      if (token !== roomToken || !snap || (expectName && snap.name !== expectName)) return;
+      delete snap.imageReady;
+      push({ kind: 'room', room: snap });
     }
 
     // --- typing commands (same approach as pbn-command-buttons) ---
@@ -193,6 +281,7 @@
         }
       });
       chatObserver.observe(container, { childList: true, subtree: true });
+      reportRoom(null);   // where we are right now, so the mapper can anchor without a move
       return true;
     }
 

@@ -1,7 +1,7 @@
-import { DIRWORD, VEC } from "./constants.js";
+import { DIRWORD, VEC, COMPASS, GRID_N } from "./constants.js";
 import { S, viewport } from "./state.js";
 import { escapeHtml, clamp } from "./utils.js";
-import { spaceOf, curSpace, roomAtCell } from "./model.js";
+import { spaceOf, curSpace, roomAtCell, createRoom } from "./model.js";
 import { commit } from "./persistence.js";
 import { render } from "./app.js";
 import { centerOnRoom, roomWorldCenter } from "./render-flat.js";
@@ -16,6 +16,8 @@ import { computePath } from "./search-path.js";
 //   bridge → page  {mm:"bridge", type:"hello"}               userscript is installed
 //                  {mm:"bridge", type:"client"}              the MUSH tab answered a ping
 //                  {mm:"bridge", type:"move", dir, name}     MUSH printed "You move <dir> to <name>."
+//                  {mm:"bridge", type:"room", room}          the side panel caught up: {name, description,
+//                                                            image, exits:{N:{name,locked,aerial}}, grid:{N:name}}
 //   page → bridge  {mm:"page", type:"probe"}                 ask for a hello
 //                  {mm:"page", type:"send", cmds:[...]}      type these into the MUSH client
 // All the logic (where you are, what to send next) lives here so it updates with the site;
@@ -39,6 +41,7 @@ const L = {
   window: 5,          // max commands queued in the game at once
   stallSec: 20,       // give up a walk after this long without a move
   seenName: null,     // name the MUSH gave for the current room, when it differs from the map's
+  snap: null,         // last room snapshot from the side panel (bridge "room" message)
 };
 let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
 
@@ -108,6 +111,93 @@ function followTo(r) {
   if (sx < mx || sx > rect.width - mx || sy < my || sy > rect.height - my) centerOnRoom(r);
 }
 
+// ---------- Anchoring from the side panel ----------
+// Every "room" snapshot carries the mini-map: the names of the rooms around this one on the game's
+// grid. With duplicate names ("Street" ×6) that's enough to tell which one we're in, so the
+// position can be found on page load without moving, and a wrong one gets corrected.
+function gridScore(r, grid) {
+  let score = 0;
+  for (const d of COMPASS) {
+    const n = neighbourCell(r, d);
+    if (n && grid[d]) score += n.name === grid[d] ? 1 : -1;
+  }
+  return score;
+}
+function anchor(snap) {
+  const cands = Object.values(S.map.rooms).filter(r => r.name === snap.name);
+  if (cands.length === 1) return cands[0];
+  if (cands.length < 2) return null;
+  const scored = cands.map(r => ({ r, score: gridScore(r, snap.grid || {}) })).sort((a, b) => b.score - a.score);
+  return scored[0].score > 0 && scored[0].score > scored[1].score ? scored[0].r : null;
+}
+function onRoom(snap) {
+  if (!snap || typeof snap.name !== "string") return;
+  L.snap = snap;
+  const cur = hereRoom();
+  if (!cur || cur.name !== snap.name) {
+    const found = anchor(snap);
+    if (found && found !== cur) setHere(found.id, snap.name);
+  }
+  if (automapOn()) autoFill(hereRoom(), snap);
+}
+
+// ---------- Auto-map (hidden: only while the URL has #automap) ----------
+// Walking off the map creates the room you walk into, and the side panel fills in what it knows.
+// Rules: only build from a position we're sure of; create into empty cells only; touch an existing
+// room only when its name matches the game's exactly, and then only its empty fields (description,
+// image, missing exits). Rooms it creates get `auto: true` until you mark them verified.
+export function automapOn() { return /(^#|&)automap(&|$)/.test(location.hash); }
+function inGrid(r, dir) {
+  if (dir === "UP" || dir === "DOWN") return true;
+  const [dx, dy] = VEC[dir];
+  return r.x + dx >= 0 && r.x + dx < GRID_N && r.y + dy >= 0 && r.y + dy < GRID_N;
+}
+// One-way on purpose: whether the way back exists is only known once the next room's exits arrive.
+function linkOneWay(a, dir, b, fly) {
+  a.exits[dir] = b.id;
+  if (fly) a.exitFly[dir] = true;
+}
+// Called on a move along an exit the map doesn't have yet. Returns the room we're now in, or null.
+let autoWarned = false;   // autoStep explained why it stopped: don't bury that under "Lost"
+function autoStep(from, dir, name) {
+  const took = L.snap && L.snap.name === from.name && L.snap.exits ? L.snap.exits[dir] : null;
+  const fly = !!(took && took.aerial);
+  const cell = neighbourCell(from, dir);
+  if (cell) {
+    if (cell.name !== name) {
+      toast(`🤖 Auto-map: ${DIRWORD[dir]} of “${escapeHtml(from.name)}” your map has “${escapeHtml(cell.name)}”, ` +
+        `but the game says “${escapeHtml(name)}”. Left alone; maybe it belongs in a space.`);
+      autoWarned = true;
+      return null;
+    }
+    linkOneWay(from, dir, cell, fly);
+    commit();
+    return cell;
+  }
+  if (!inGrid(from, dir)) return null;
+  const [dx, dy] = dir === "UP" || dir === "DOWN" ? [0, 0] : VEC[dir];
+  const dz = dir === "UP" ? 1 : dir === "DOWN" ? -1 : 0;
+  const r = createRoom(from.z + dz, from.x + dx, from.y + dy, name, spaceOf(from));
+  r.auto = true;
+  linkOneWay(from, dir, r, fly);
+  commit();
+  return r;
+}
+// Fill the current room's empty fields from the panel, and link exits whose destination is
+// already on the map in that direction (this is also how the way back gets linked).
+function autoFill(r, snap) {
+  if (!r || r.name !== snap.name) return;
+  let changed = false;
+  if (!r.description && snap.description) { r.description = snap.description; changed = true; }
+  if (!r.imageUrl && snap.image) { r.imageUrl = snap.image; changed = true; }
+  for (const [d, ex] of Object.entries(snap.exits || {})) {
+    if (r.exits[d] || !ex || !ex.name) continue;   // flight exits never name where they go
+    const n = neighbourCell(r, d);
+    if (n && n.name === ex.name) { r.exits[d] = n.id; changed = true; }
+  }
+  if (changed) { commit(); render(); }
+}
+
 function onMove(word, name) {
   const dir = DIR_OF[(word || "").toLowerCase()] || null;
   if (W) {
@@ -122,8 +212,12 @@ function onMove(word, name) {
       return;
     }
   }
-  const to = resolveMove(hereRoom(), dir, name);
-  if (!to && S.here) toast(`📍 Lost: “${escapeHtml(name)}” isn't on the map (or not uniquely). Select it and press 📍 I'm here.`);
+  const from = hereRoom();
+  let to = null;
+  autoWarned = false;
+  if (automapOn() && from && !L.seenName && dir && !from.exits[dir]) to = autoStep(from, dir, name);
+  if (!to) to = resolveMove(from, dir, name);
+  if (!to && S.here && !autoWarned) toast(`📍 Lost: “${escapeHtml(name)}” isn't on the map (or not uniquely). Select it and press 📍 I'm here.`);
   setHere(to ? to.id : null, name);
 }
 
@@ -188,7 +282,7 @@ function updateChip() {
   btn.style.display = L.bridge ? "" : "none";
   const alive = clientAlive();
   btn.classList.toggle("live-on", alive);
-  btn.textContent = W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab";
+  btn.textContent = (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab") + (automapOn() ? " · 🤖" : "");
   btn.title = W ? "Walking a route. Click for details or to stop." :
     alive ? "Linked to the MUSH client: following your position." :
     "The bridge userscript is installed, but no MUSH client tab is answering. Open the client, or click into it.";
@@ -278,8 +372,11 @@ window.addEventListener("message", e => {
     updateChip(); refreshLivePanel();
   } else if (m.type === "move" && S.map) {
     onMove(String(m.dir || ""), String(m.name || ""));
+  } else if (m.type === "room" && S.map) {
+    onRoom(m.room);
   }
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
+window.addEventListener("hashchange", () => { updateChip(); if (automapOn()) toast("🤖 Auto-map on"); });
 loadLive();
 post("probe");
