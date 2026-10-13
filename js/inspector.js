@@ -13,6 +13,8 @@ import { setSpace, roomLocation, confirmDeleteRooms, spaceColor, shortLayerName 
 import { spaceOf } from "./model.js";
 import { startDoorCapture, startSelectionCapture } from "./capture.js";
 import { startRelease } from "./release.js";
+import { liveBridge, setHere } from "./live.js";
+import { computePath } from "./search-path.js";
 
 // ---------- Inspector ----------
 export function renderInspector() {
@@ -144,6 +146,13 @@ export function renderInspector() {
     <div class="hint">grid (${r.x}, ${r.y})</div>
   </div>`;
 
+  if (liveBridge()) {
+    h += `<div class="insec liveinsec">` + (S.here === r.id
+      ? `<div class="hint">📍 You are here.</div>`
+      : `<button id="f_here" title="Tell the live link this is the room you're standing in">📍 I'm here</button>` +
+        (S.map.rooms[S.here] ? `<button id="f_route" title="Shortest route from where you are to this room; walk it from the route box">🧭 Route here</button>` : "")) +
+      `</div>`;
+  }
   h += `<div class="insec"><span class="seclabel">Traits</span><div class="trait-chips" id="f_traits"></div></div>`;
 
   h += `<div class="insec">
@@ -241,6 +250,10 @@ export function renderInspector() {
     }
   };
   document.getElementById("f_img").onchange = () => commit();
+  const hereBtn = document.getElementById("f_here");
+  if (hereBtn) hereBtn.onclick = () => setHere(r.id);
+  const routeBtn = document.getElementById("f_route");
+  if (routeBtn) routeBtn.onclick = () => computePath(S.here, r.id);
   document.querySelectorAll("[data-carve]").forEach(b => b.onclick = () => carve(r.id, b.dataset.carve));
   document.querySelectorAll("[data-delexit]").forEach(b => b.onclick = () => { delete r.exits[b.dataset.delexit]; delete r.exitFly[b.dataset.delexit]; commit(); render(); });
   document.querySelectorAll("[data-fly]").forEach(b => b.onclick = () => { const d = b.dataset.fly; setExitFly(r.id, d, !(r.exitFly && r.exitFly[d])); commit(); render(); });

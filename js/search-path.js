@@ -6,6 +6,7 @@ import { gotoRoom } from "./inspector.js";
 import { render } from "./app.js";
 import { setMode } from "./toolbar.js";
 import { spaceName, spaceColor } from "./spaces.js";
+import { liveBridge, walking, startWalk, stopWalk } from "./live.js";
 
 // ---------- Search ----------
 export function runSearch(term) {
@@ -149,11 +150,15 @@ export function computePath(startId, endId) {
       `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}` +
         (flyCount ? ` · <span class="flystep" style="font-weight:700">${flyCount} flown</span>` : "") +
         (trainCount ? ` · <span class="trainstep" style="font-weight:700">${trainCount} train leg${trainCount !== 1 ? "s" : ""}</span>` : "") + `</div>` +
-      dirsHtml + spacesHtml(res.rooms) +
+      dirsHtml + spacesHtml(res.rooms) + walkHtml(startId, res) +
       `<div>${flyChk}</div>` +
       `<button id="pathClose">✕ clear</button>`;
   }
   document.getElementById("pathClose").onclick = clearPath;
+  const wb = document.getElementById("pathWalk");
+  if (wb) wb.onclick = () => { startWalk(res); computePath(startId, endId); };
+  const sb = document.getElementById("pathStop");
+  if (sb) sb.onclick = () => stopWalk("Stopped by you.");
   const fc = document.getElementById("pathFly");
   if (fc) fc.onchange = () => { S.pathCanFly = fc.checked; if (S.pathLast) computePath(S.pathLast.startId, S.pathLast.endId); };
   box.querySelectorAll(".pathleg").forEach(b => { b.onclick = () => gotoRoom(b.dataset.goto); });
@@ -164,6 +169,18 @@ export function computePath(startId, endId) {
     }).catch(() => {});
   });
   render();
+}
+// "▶ Walk it" for the live link (live.js): types the route into the MUSH client 5 moves at a time.
+function walkHtml(startId, res) {
+  if (!liveBridge() || !res.steps.length) return "";
+  if (walking()) return `<div class="pathwalk"><button id="pathStop" class="danger">■ Stop walking</button></div>`;
+  if (res.steps[0].type === "train") return "";
+  const off = S.here && S.here !== startId && S.map.rooms[S.here];
+  return `<div class="pathwalk">` +
+    (off ? `<div class="hint">⚠ The live link thinks you're at <b>${escapeHtml(off.name)}</b>, not the start.</div>` : "") +
+    `<button id="pathWalk" class="primary" title="Type this route into the MUSH client, a few moves at a time">▶ Walk it</button>` +
+    (res.steps.some(s => s.type === "train") ? ` <span class="hint">walks up to the first train</span>` : "") +
+    `</div>`;
 }
 // When a route crosses spaces, list the hand-offs ("Main map → ⧉ Highrise Apts") with each
 // leg clickable, since only the part of the route in the viewed space is highlighted.

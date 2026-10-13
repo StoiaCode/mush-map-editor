@@ -27,7 +27,7 @@ html, body {
 }
 #topbar .title { font-size: 18px; line-height: 1; margin-right: 4px; cursor: default; }
 #topbar .spacer { flex: 1; }
-button, select, input[type=text], textarea {
+button, select, input[type=text], input[type=number], textarea {
   font-family: inherit; font-size: 12px;
   background: var(--panel2); color: var(--text);
   border: 1px solid var(--line); border-radius: 5px;
@@ -450,3 +450,42 @@ select { cursor: pointer; }
 }
 #zoomctl #zoomLabel { min-width: 38px; text-align: center; }
 #spaceCrumb .crumb.here { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Live link (live.js) ---------- */
+/* the room you're standing in: a pulsing green ring with a "you" tag */
+.room.here::after {
+  content: ""; position: absolute; inset: -9px; border: 3px solid #3ddc84; border-radius: 13px;
+  pointer-events: none; animation: herepulse 1.6s ease-in-out infinite;
+}
+.room.here::before {
+  content: "you"; position: absolute; top: -24px; left: 50%; transform: translateX(-50%);
+  background: #3ddc84; color: #0d1a12; font-size: 9px; font-weight: 800; letter-spacing: .5px;
+  padding: 1px 5px; border-radius: 6px; pointer-events: none; text-transform: uppercase;
+}
+@keyframes herepulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { .room.here::after { animation: none; } }
+#liveBtn { font-size: 11px; color: var(--muted); }
+#liveBtn.live-on { color: #3ddc84; border-color: rgba(61,220,132,.5); }
+#livePanel { width: 300px; }
+.liverow { margin: 6px 0; line-height: 1.5; }
+.livewarn { color: #e8c93a; }
+.livewarn button { margin-left: 4px; padding: 1px 6px; font-size: 11px; }
+.livedot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+.livedot.on { background: #3ddc84; }
+#livePanel input[type=number] { width: 56px; }
+.linkish { background: none; border: none; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; }
+.linkish:hover { text-decoration: underline; }
+.liveinsec { display: flex; gap: 6px; }
+.liveinsec button { flex: 1; }
+#pathResult .pathwalk { margin: 6px 0; }
+#pathResult #pathWalk { background: #2a6b45; border-color: #3ddc84; color: #fff; font-weight: 700; }
+#bridgeOffer {
+  position: absolute; left: 12px; bottom: 56px; z-index: 95; max-width: 320px;
+  background: var(--panel); border: 1px solid #3ddc84; border-radius: 8px;
+  padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.6); font-size: 12px; line-height: 1.45;
+}
+#bridgeOffer .bo-btns { display: flex; gap: 6px; margin-top: 8px; }
+#bridgeOffer .bo-install {
+  background: #2a6b45; border: 1px solid #3ddc84; color: #fff; font-weight: 700;
+  border-radius: 5px; padding: 5px 9px; text-decoration: none;
+}

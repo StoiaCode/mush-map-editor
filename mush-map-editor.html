@@ -12,6 +12,8 @@
 
 <meta name="description" content="A single-file editor for documenting tile-based, multi-level MUSH maps. Flat grid and 3D views, zones, search and pathfinding.">
 <meta name="theme-color" content="#5b9dff">
+<!-- tells the bridge userscript (userscript/mush-mapper-bridge.user.js) that this page is the mapper -->
+<meta name="mush-mapper" content="1">
 
 <!-- Open Graph / link embeds (Discord, Slack, etc.). To get a preview image,
      set og:url and og:image below to absolute URLs on your own host. -->
@@ -74,6 +76,7 @@
     <input type="text" id="searchBox" placeholder="🔍 Search rooms…">
     <span id="searchInfo" class="statuschip"></span>
     <span id="linkHint" class="statuschip" style="display:none;color:var(--good)"></span>
+    <button id="liveBtn" style="display:none"></button>
 
     <span class="spacer"></span>
     <span class="statuschip" id="saveStatus"></span>
@@ -121,6 +124,7 @@
       <button id="zoomReset" title="Reset view">Reset</button>
     </span>
     <div id="toast"></div>
+    <div id="bridgeOffer" style="display:none"></div>
 
     <button id="inspectorToggle" title="Collapse/expand the inspector panel"></button>
     <div id="inspector"></div>
@@ -214,6 +218,11 @@
   <div id="traitsBody"></div>
   <button id="traitsNewBtn" class="primary" style="width:100%;margin-top:6px;">+ New trait</button>
   <div class="hint" style="padding:8px 0 0;">Click the emoji or label to rename. Assign traits to a room from its inspector panel.</div>
+</div>
+
+<div id="livePanel" class="popover">
+  <div class="pop-hdr">Live link <button class="popclose" data-close="livePanel">✕</button></div>
+  <div id="liveBody"></div>
 </div>
 
 <div id="ridePicker">

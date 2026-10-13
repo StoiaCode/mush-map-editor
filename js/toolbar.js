@@ -322,7 +322,8 @@ document.getElementById("traitsNewBtn").onclick = () => {
 
 // close popovers when clicking elsewhere
 const POPS = { legendPanel: "legendBtn", onionPanel: "onionBtn", statsPanel: "statsBtn",
-               exportPanel: "exportBtn", traitsPanel: "traitsBtn", spacesPanel: "spacesBtn" };
+               exportPanel: "exportBtn", traitsPanel: "traitsBtn", spacesPanel: "spacesBtn",
+               livePanel: "liveBtn" };
 document.addEventListener("mousedown", e => {
   for (const id of Object.keys(POPS)) {
     const panel = document.getElementById(id);

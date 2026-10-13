@@ -311,6 +311,7 @@ export function makeRoomEl(r, ghost) {
     + (!ghost && r.id === S.pendingLink ? " linksource" : "")
     + (!ghost && r.id === S.pathStart ? " linksource" : "")
     + (!ghost && S.pathRooms.has(r.id) ? " pathhit" : "")
+    + (!ghost && r.id === S.here ? " here" : "")
     + (!ghost && S.searchTerm && S.searchMatches.includes(r.id) ? " searchhit" : "")
     + (!ghost && S.capture ? captureClass(r) : "");
   el.dataset.id = r.id;

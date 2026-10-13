@@ -18,3 +18,5 @@
 !character-tracker/**
 !docs/
 !docs/**
+!userscript/
+!userscript/**

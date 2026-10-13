@@ -4,6 +4,7 @@ WORKDIR /www
 COPY mush-map-editor.html /www/index.html
 COPY css /www/css
 COPY js /www/js
+COPY userscript /www/userscript
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 EXPOSE 80
