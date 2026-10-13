@@ -92,6 +92,8 @@ export function addExit(fromId, dir, toId) {
   // Connections are bidirectional: write the exit and its reciprocal.
   from.exits[dir] = toId;
   to.exits[opp] = fromId;
+  if (from.openExits) delete from.openExits[dir];   // real exits replace "unexplored" stubs
+  if (to.openExits) delete to.openExits[opp];
   return { ok:true };
 }
 
@@ -111,15 +113,17 @@ export function setExitFly(roomId, dir, fly) {
 // Carve: works for all 10 directions.
 //  compass -> same layer, neighbouring cell.
 //  UP/DOWN -> same (x,y), layer above/below. Behaves exactly like a compass carve, on z.
-export function carve(fromId, dir) {
+// name: for the new room (e.g. an unexplored exit's stored name); defaults to "New Room".
+export function carve(fromId, dir, name) {
   const from = S.map.rooms[fromId];
   if (!from) return;
+  if (from.openExits) delete from.openExits[dir];   // a real exit replaces the "unexplored" stub
 
   if (dir === "UP" || dir === "DOWN") {
     if (from.exits[dir]) { gotoRoom(from.exits[dir]); return; } // already linked: just travel
     const nz = from.z + (dir === "UP" ? 1 : -1);
     let target = roomAtCell(nz, from.x, from.y, spaceOf(from));
-    if (!target) target = createRoom(nz, from.x, from.y, "New Room", spaceOf(from));
+    if (!target) target = createRoom(nz, from.x, from.y, name || "New Room", spaceOf(from));
     from.exits[dir] = target.id;
     target.exits[OPP[dir]] = from.id;
     selectSingle(target.id);
@@ -133,7 +137,7 @@ export function carve(fromId, dir) {
   const nx = clamp(from.x + dx, 0, GRID_N - 1);
   const ny = clamp(from.y + dy, 0, GRID_N - 1);
   let target = roomAtCell(from.z, nx, ny, spaceOf(from));
-  if (!target) target = createRoom(from.z, nx, ny, "New Room", spaceOf(from));
+  if (!target) target = createRoom(from.z, nx, ny, name || "New Room", spaceOf(from));
   from.exits[dir] = target.id;
   target.exits[OPP[dir]] = from.id;
   selectSingle(target.id);

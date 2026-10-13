@@ -458,7 +458,7 @@ select { cursor: pointer; }
   pointer-events: none; animation: herepulse 1.6s ease-in-out infinite;
 }
 .room.here::before {
-  content: "you"; position: absolute; top: -24px; left: 50%; transform: translateX(-50%);
+  content: "you"; position: absolute; top: -15px; z-index: 1; left: 50%; transform: translateX(-50%);
   background: #3ddc84; color: #0d1a12; font-size: 9px; font-weight: 800; letter-spacing: .5px;
   padding: 1px 5px; border-radius: 6px; pointer-events: none; text-transform: uppercase;
 }
@@ -537,3 +537,35 @@ select { cursor: pointer; }
 .autonote { margin: 0 0 8px; padding: 6px 8px; border: 1px dashed #e8c93a; border-radius: 6px;
   color: #e8c93a; font-size: 11px; display: flex; align-items: center; gap: 8px; }
 .autonote button { margin-left: auto; padding: 2px 8px; font-size: 11px; flex: none; }
+
+/* ---------- Unexplored exits & ghost tiles (ghosts.js / live.js) ---------- */
+.openlabel { font-size: 13px; font-weight: 800; fill: #e8c93a; }
+.vbadge.openbadge { background: #3a3218; color: #e8c93a; border: 1px dashed #e8c93a; cursor: default; }
+.exitrow .tgt.open { color: #e8c93a; font-style: italic; cursor: default; }
+.exitrow .tgt.open:hover { text-decoration: none; }
+.openaddbtn { width: 100%; margin-top: 8px; font-size: 11px; color: var(--muted); border-style: dashed; }
+.openaddbtn:hover { color: var(--text); }
+.openadd { display: flex; gap: 4px; margin-top: 8px; }
+.openadd select { flex: none; padding: 4px; }
+.openadd input { flex: 1; min-width: 0; }
+.openadd button { flex: none; padding: 4px 8px; }
+.openadd .primary { background: var(--accent2); border-color: var(--accent); color: #fff; }
+
+.ghosttile {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  border: 2px dashed rgba(154,166,184,.55); border-radius: 8px;
+  background: rgba(154,166,184,.07); color: rgba(216,221,230,.6);
+  font-size: 9px; font-weight: 600; line-height: 1.1; padding: 2px 4px;
+  overflow: hidden; cursor: pointer; user-select: none;
+}
+.ghosttile span { overflow: hidden; max-height: 100%; }
+.ghosttile:hover { border-color: #e8c93a; color: var(--text); background: rgba(232,201,58,.08); }
+#ghostMenu {
+  position: fixed; z-index: 120; min-width: 180px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.6); font-size: 12px;
+}
+#ghostMenu .gm-name { font-weight: 700; margin: 0 2px 1px; }
+#ghostMenu .gm-sub { font-size: 11px; color: var(--muted); margin: 0 2px 6px; }
+#ghostMenu button { display: block; width: 100%; text-align: left; margin-top: 4px; }

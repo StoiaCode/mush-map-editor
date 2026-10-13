@@ -17,6 +17,7 @@ import { liveBridge, setHere } from "./live.js";
 import { computePath } from "./search-path.js";
 
 // ---------- Inspector ----------
+let openAddFor = null;   // room id whose "+ Unexplored exit" form is open
 export function renderInspector() {
   // A pending move (capture.js / release.js) locks editing; the banner above the map has the controls.
   if (S.capture) {
@@ -171,12 +172,23 @@ export function renderInspector() {
         </div>
       <button data-carve="E">E</button>
       <button data-carve="SW">SW</button><button data-carve="S">S</button><button data-carve="SE">SE</button>
-    </div>
-  </div>`;
+    </div>`;
+  // "+ Unexplored exit": the game has an exit here but you haven't mapped where it goes
+  const freeDirs = DIRS.filter(d => !r.exits[d] && !(r.openExits && r.openExits[d]));
+  if (openAddFor === r.id && freeDirs.length) {
+    h += `<div class="openadd">
+      <select id="oa_dir">${freeDirs.map(d => `<option value="${d}">${d}</option>`).join("")}</select>
+      <input type="text" id="oa_name" placeholder="Leads to… (optional)">
+      <button id="oa_ok" class="primary">Add</button><button id="oa_cancel" title="Cancel">✕</button></div>`;
+  } else if (freeDirs.length) {
+    h += `<button id="oa_open" class="openaddbtn" title="Note an exit whose destination you haven't mapped yet">＋ Unexplored exit…</button>`;
+  }
+  h += `</div>`;
 
   h += `<div class="insec"><span class="seclabel">Exits</span>`;
   const exitDirs = DIRS.filter(d => r.exits[d]);
-  if (!exitDirs.length) h += `<div class="hint">No exits yet.</div>`;
+  const openDirs = DIRS.filter(d => !r.exits[d] && r.openExits && r.openExits[d]);
+  if (!exitDirs.length && !openDirs.length) h += `<div class="hint">No exits yet.</div>`;
   for (const d of exitDirs) {
     const t = S.map.rooms[r.exits[d]];
     const crosses = t && spaceOf(t) !== spaceOf(r);
@@ -187,6 +199,13 @@ export function renderInspector() {
       ${t && !crosses ? `<button class="capbtn" data-capture="${d}" title="Move everything behind this exit into a pocket space… (opens a preview first)">⧉</button>` : ""}
       <button class="flytoggle${fly ? " on" : ""}" data-fly="${d}" title="Flight-only exit (requires flying)">✈</button>
       <button data-delexit="${d}">✕</button></div>`;
+  }
+  for (const d of openDirs) {
+    const o = r.openExits[d];
+    h += `<div class="exitrow openrow"><span class="dir">${d}</span>
+      <span class="tgt open" title="The game has this exit; where it leads isn't mapped yet">? ${escapeHtml(o.name || (o.fly ? "flight exit" : "unexplored"))}</span>
+      <button data-opencarve="${d}" title="Create the room it leads to${o.name ? ", named " + escapeAttr(o.name) : ""}">Carve</button>
+      <button data-delopen="${d}" title="Remove this unexplored exit">✕</button></div>`;
   }
   h += `</div>`;
   const lines = stationLinesFor(r.id);
@@ -261,6 +280,31 @@ export function renderInspector() {
   if (hereBtn) hereBtn.onclick = () => setHere(r.id);
   const routeBtn = document.getElementById("f_route");
   if (routeBtn) routeBtn.onclick = () => computePath(S.here, r.id);
+  const oaOpen = document.getElementById("oa_open");
+  if (oaOpen) oaOpen.onclick = () => { openAddFor = r.id; renderInspector(); document.getElementById("oa_name")?.focus(); };
+  const oaCancel = document.getElementById("oa_cancel");
+  if (oaCancel) oaCancel.onclick = () => { openAddFor = null; renderInspector(); };
+  const oaOk = document.getElementById("oa_ok");
+  if (oaOk) {
+    const add = () => {
+      const d = document.getElementById("oa_dir").value;
+      const name = document.getElementById("oa_name").value.trim();
+      if (!r.openExits) r.openExits = {};
+      r.openExits[d] = { name: name || null, fly: false };
+      openAddFor = null;
+      commit(); render();
+    };
+    oaOk.onclick = add;
+    document.getElementById("oa_name").onkeydown = e => { if (e.key === "Enter") add(); if (e.key === "Escape") { openAddFor = null; renderInspector(); } };
+  }
+  document.querySelectorAll("[data-opencarve]").forEach(b => b.onclick = () => {
+    const d = b.dataset.opencarve, o = r.openExits[d];
+    carve(r.id, d, o.name || undefined);   // commits; also drops the stub
+    if (o.fly && r.exits[d]) { setExitFly(r.id, d, true); commit(); render(); }
+  });
+  document.querySelectorAll("[data-delopen]").forEach(b => b.onclick = () => {
+    delete r.openExits[b.dataset.delopen]; commit(); render();
+  });
   document.querySelectorAll("[data-carve]").forEach(b => b.onclick = () => carve(r.id, b.dataset.carve));
   document.querySelectorAll("[data-delexit]").forEach(b => b.onclick = () => { delete r.exits[b.dataset.delexit]; delete r.exitFly[b.dataset.delexit]; commit(); render(); });
   document.querySelectorAll("[data-fly]").forEach(b => b.onclick = () => { const d = b.dataset.fly; setExitFly(r.id, d, !(r.exitFly && r.exitFly[d])); commit(); render(); });

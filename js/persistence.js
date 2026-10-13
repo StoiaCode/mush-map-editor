@@ -93,6 +93,12 @@ export function normalize() {
     fixSpace(r);
     if (!r.exits) r.exits = {};
     if (!r.exitFly) r.exitFly = {};   // directions on this room that require flight
+    // openExits = {dir: {name, fly}}: exits the game has that lead somewhere not mapped yet.
+    // Optional (absent on most rooms); a real exit in the same direction supersedes it.
+    if (r.openExits) {
+      if (typeof r.openExits !== "object") delete r.openExits;
+      else for (const d of Object.keys(r.openExits)) if (r.exits[d] || !r.openExits[d] || typeof r.openExits[d] !== "object") delete r.openExits[d];
+    }
     if (r.imageUrl == null) r.imageUrl = "";
     if (!Array.isArray(r.traits)) r.traits = [];
     r.traits = r.traits.filter(id => traitIds.has(id));

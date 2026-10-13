@@ -8,6 +8,7 @@ import { render } from "./app.js";
 import { loadRoomImage } from "./image-loader.js";
 import { captureClass } from "./capture.js";
 import { drawReleaseGhost } from "./release.js";
+import { drawGhosts } from "./ghosts.js";
 
 // ---------- Layer navigation ----------
 export function setLayer(z) {
@@ -101,7 +102,7 @@ export function positionGrid() {
 
 // ---------- Flat render ----------
 export function renderFlat() {
-  world.querySelectorAll(".room").forEach(e => e.remove());
+  world.querySelectorAll(".room, .ghosttile").forEach(e => e.remove());
   world.querySelectorAll(".area-label, .area-resize").forEach(e => e.remove());
   const z = S.map.currentLayer;
 
@@ -161,9 +162,38 @@ export function renderFlat() {
 
   if (S.capture && S.capture.kind !== "release") drawCaptureDoors(z);
 
+  // unexplored exits (the game has them, the map doesn't know where they go) and ghost tiles
+  for (const r of roomsOnLayer(z)) drawOpenExits(r);
+  drawGhosts(z);
+
   // --- current layer rooms (solid, on top) ---
   for (const r of roomsOnLayer(z)) world.appendChild(makeRoomEl(r, false));
   drawReleaseGhost();
+}
+
+// A short dashed stub ending in "?" for each compass exit in r.openExits without a real exit.
+// Up/down ones are a "?" badge on the tile instead (makeRoomEl).
+const OPEN_COLOR = "#e8c93a";
+function drawOpenExits(r) {
+  if (!r.openExits) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const a = roomWorldCenter(r);
+  for (const d of Object.keys(r.openExits)) {
+    if (r.exits[d] || !VEC[d]) continue;
+    const [dx, dy] = VEC[d];
+    const x2 = a.x + dx * CELL * 0.55, y2 = a.y + dy * CELL * 0.55;
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+    line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+    line.setAttribute("stroke", OPEN_COLOR); line.setAttribute("stroke-width", "2.5");
+    line.setAttribute("stroke-dasharray", "3,4");
+    svg.appendChild(line);
+    const txt = document.createElementNS(ns, "text");
+    txt.setAttribute("x", x2 + dx * 7); txt.setAttribute("y", y2 + dy * 7 + 4);
+    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("class", "openlabel");
+    txt.textContent = "?";
+    svg.appendChild(txt);
+  }
 }
 
 // Capture preview: every exit that will become a door of the new space, in red — a line when
@@ -341,6 +371,14 @@ export function makeRoomEl(r, ghost) {
   if (!ghost) {
     if (r.exits.UP)   el.appendChild(markDoor(vbadge("up", "↑", r.exitFly && r.exitFly.UP), r, "UP"));
     if (r.exits.DOWN) el.appendChild(markDoor(vbadge("down", "↓", r.exitFly && r.exitFly.DOWN), r, "DOWN"));
+    for (const d of ["UP", "DOWN"]) {
+      if (r.exits[d] || !r.openExits || !r.openExits[d]) continue;
+      const b = vbadge(d === "UP" ? "up" : "down", "?");
+      b.classList.add("openbadge");
+      delete b.dataset.vbadge;   // nowhere to jump to: a click just selects the room
+      b.title = `Unexplored exit ${d.toLowerCase()}` + (r.openExits[d].name ? `: ${r.openExits[d].name}` : "");
+      el.appendChild(b);
+    }
     const doors = crossExits(r);
     if (doors.length) el.appendChild(doorBadge(doors));
     const lines = stationLinesFor(r.id);

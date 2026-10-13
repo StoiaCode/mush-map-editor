@@ -9,6 +9,7 @@ import { setSpace, toast, roomLocation } from "./spaces.js";
 import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
 import { computePath, findPath } from "./search-path.js";
+import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 
 // ---------- Live link to the MUSH web client ----------
 // The MUSH client is another site, so this page can't touch it. The bridge userscript
@@ -164,6 +165,7 @@ function inGrid(r, dir) {
 function linkOneWay(a, dir, b, fly) {
   a.exits[dir] = b.id;
   if (fly) a.exitFly[dir] = true;
+  if (a.openExits) delete a.openExits[dir];
 }
 // Called on a move along an exit the map doesn't have yet. Returns the room we're now in, or null.
 let autoWarned = false;   // autoStep explained why it stopped: don't bury that under "Lost"
@@ -199,11 +201,30 @@ function autoFill(r, snap) {
   if (!r.description && snap.description) { r.description = snap.description; changed = true; }
   if (!r.imageUrl && snap.image) { r.imageUrl = snap.image; changed = true; }
   for (const [d, ex] of Object.entries(snap.exits || {})) {
-    if (r.exits[d] || !ex || !ex.name) continue;   // flight exits never name where they go
-    const n = neighbourCell(r, d);
-    if (n && n.name === ex.name) { r.exits[d] = n.id; changed = true; }
+    if (!ex || r.exits[d]) continue;
+    // flight exits never name where they go, so they can't be matched to a mapped room
+    const n = ex.name ? neighbourCell(r, d) : null;
+    if (n && n.name === ex.name) {
+      r.exits[d] = n.id;
+      if (r.openExits) delete r.openExits[d];
+      changed = true;
+      continue;
+    }
+    // the game has this exit, the map doesn't know where it goes: note it as unexplored
+    const cur = r.openExits && r.openExits[d];
+    if (!cur) { (r.openExits ||= {})[d] = { name: ex.name || null, fly: !!ex.aerial }; changed = true; }
+    else if (!cur.name && ex.name) { cur.name = ex.name; changed = true; }
   }
   if (changed) { commit(); render(); }
+  // ghost tiles for mini-map neighbours on empty cells (ghosts.js; per browser, not map data)
+  const list = [];
+  for (const d of COMPASS) {
+    const name = snap.grid && snap.grid[d];
+    if (!name || !inGrid(r, d)) continue;
+    const [dx, dy] = VEC[d];
+    list.push({ space: spaceOf(r), z: r.z, x: r.x + dx, y: r.y + dy, name });
+  }
+  if (addGhosts(list)) render();
 }
 
 function onMove(word, name) {
@@ -428,6 +449,14 @@ function buildLivePanel() {
       <div class="liveprog"><span style="width:${pct}%"></span></div>
       <div class="livesub">${W.done} of ${W.steps.length} steps</div></div>`;
   }
+  const gn = ghostCount(), gd = dismissedCount();
+  if (gn || gd) {
+    h += `<div class="livelabel livesettings">Ghost tiles</div>` +
+      (gn ? `<div class="livesetting"><div><div>${gn} on the map</div><div class="livesub">Seen on the game's mini-map, not visited</div></div>
+        <button class="livebtn" id="liveGhostClear">Clear all</button></div>` : "") +
+      (gd ? `<div class="livesetting"><div><div>${gd} dismissed</div><div class="livesub">Won't come back until reset</div></div>
+        <button class="livebtn" id="liveGhostReset">Reset</button></div>` : "");
+  }
   h += `<div class="livelabel livesettings">Settings</div>
     <div class="livesetting">
       <div><div>Follow my position</div><div class="livesub">Keep the map centred on you</div></div>
@@ -450,6 +479,8 @@ function buildLivePanel() {
   on("liveStop", "onclick", () => stopWalk("Stopped by you."));
   on("liveFollow", "onchange", e => { L.follow = e.target.checked; saveLive(); if (L.follow && r) followTo(r); });
   on("liveForget", "onclick", () => setHere(null));
+  on("liveGhostClear", "onclick", () => { clearGhosts(); buildLivePanel(); });
+  on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
 }
