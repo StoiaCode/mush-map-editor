@@ -42,6 +42,8 @@ const L = {
   stallSec: 20,       // give up a walk after this long without a move
   seenName: null,     // name the MUSH gave for the current room, when it differs from the map's
   snap: null,         // last room snapshot from the side panel (bridge "room" message)
+  bridgeV: null,      // version the installed bridge reported
+  latestV: null,      // @version of the bridge file this site serves
 };
 let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
 
@@ -282,8 +284,10 @@ function updateChip() {
   btn.style.display = L.bridge ? "" : "none";
   const alive = clientAlive();
   btn.classList.toggle("live-on", alive);
+  btn.classList.toggle("live-update", bridgeOutdated());
   btn.textContent = (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab") + (automapOn() ? " · 🤖" : "");
-  btn.title = W ? "Walking a route. Click for details or to stop." :
+  btn.title = bridgeOutdated() ? "A newer version of the bridge userscript is available. Click to update." :
+    W ? "Walking a route. Click for details or to stop." :
     alive ? "Linked to the MUSH client: following your position." :
     "The bridge userscript is installed, but no MUSH client tab is answering. Open the client, or click into it.";
 }
@@ -296,32 +300,80 @@ export function refreshLivePanel() {
 function buildLivePanel() {
   const body = document.getElementById("liveBody");
   const r = hereRoom();
-  let h = `<div class="liverow">${clientAlive() ? `<span class="livedot on"></span>MUSH tab connected` : `<span class="livedot"></span>No MUSH tab answering`}</div>`;
-  h += `<div class="liverow"><b>📍 You are:</b> ` + (r
-    ? `<button class="linkish" id="liveGoto">${escapeHtml(r.name)}</button> <span class="hint">${escapeHtml(roomLocation(r))}</span>`
-    : `<span class="hint">unknown. Select your room and press <b>📍 I'm here</b> in the inspector, or just walk somewhere with a unique name.</span>`) + `</div>`;
+  const alive = clientAlive();
+  const pill = document.getElementById("liveStatus");
+  pill.className = "livepill" + (alive ? " on" : "");
+  pill.textContent = alive ? "Connected" : "No MUSH tab";
+
+  let h = "";
+  if (bridgeOutdated()) {
+    h += `<div class="livecard liveupdate"><div><b>Bridge update</b><div class="livesub">${escapeHtml(L.bridgeV)} → ${escapeHtml(L.latestV)}</div></div>
+      <a class="livebtn primary" href="${BRIDGE_URL}" target="_blank" rel="noopener">Update</a></div>`;
+  }
+  h += `<div class="livecard">` + (r
+    ? `<div class="livelabel">You are in</div>
+       <div class="livehere">
+         <button class="liveroom" id="liveGoto" title="Show on the map">${escapeHtml(r.name)}</button>
+         <button class="liveicon" id="liveForget" title="Forget my position">✕</button>
+       </div>
+       <div class="livesub">${escapeHtml(roomLocation(r))}</div>`
+    : `<div class="livelabel">You are in</div>
+       <div class="livesub">Unknown. Move once in the game, or select your room and press <b>📍 I'm here</b>.</div>`) +
+    `</div>`;
   if (r && L.seenName) {
-    h += `<div class="liverow livewarn">The MUSH calls this room “${escapeHtml(L.seenName)}”.
-      <button id="liveRename">Rename the tile</button></div>`;
+    h += `<div class="livecard livewarn"><div>The game calls this room <b>“${escapeHtml(L.seenName)}”</b>.</div>
+      <button class="livebtn" id="liveRename">Rename tile</button></div>`;
   }
   if (W) {
     const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
-    h += `<div class="liverow"><b>🚶 Walking</b> to ${escapeHtml(dest ? dest.name : "?")}: ${W.done}/${W.steps.length} steps
-      <button class="danger" id="liveStop">■ Stop</button></div>`;
+    const pct = Math.round(W.done / W.steps.length * 100);
+    h += `<div class="livecard">
+      <div class="livewalkhead"><div><div class="livelabel">Walking to</div><b>${escapeHtml(dest ? dest.name : "?")}</b></div>
+        <button class="livebtn danger" id="liveStop">■ Stop</button></div>
+      <div class="liveprog"><span style="width:${pct}%"></span></div>
+      <div class="livesub">${W.done} of ${W.steps.length} steps</div></div>`;
   }
-  h += `<label class="poprow"><input type="checkbox" id="liveFollow"${L.follow ? " checked" : ""}> Keep the map on my position</label>
-    <label class="poprow">Moves queued at once <input type="number" id="liveWindow" min="1" max="20" value="${L.window}"></label>
-    <label class="poprow">Stop a walk after <input type="number" id="liveStall" min="5" max="300" value="${L.stallSec}"> s without moving</label>`;
-  if (r) h += `<button id="liveForget" style="width:100%;margin-top:6px;">Forget my position</button>`;
+  h += `<div class="livelabel livesettings">Settings</div>
+    <div class="livesetting">
+      <div><div>Follow my position</div><div class="livesub">Keep the map centred on you</div></div>
+      <label class="liveswitch"><input type="checkbox" id="liveFollow"${L.follow ? " checked" : ""}><span></span></label>
+    </div>
+    <div class="livesetting">
+      <div><div>Queue size</div><div class="livesub">Moves sent ahead at once</div></div>
+      ${stepper("liveWindow", L.window, "")}
+    </div>
+    <div class="livesetting">
+      <div><div>Give up after</div><div class="livesub">Stop a walk with no movement</div></div>
+      ${stepper("liveStall", L.stallSec, "s")}
+    </div>`;
+  if (automapOn()) h += `<div class="liveauto">🤖 Auto-map is on</div>`;
   body.innerHTML = h;
+
   const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
   on("liveGoto", "onclick", () => gotoRoom(r.id));
   on("liveRename", "onclick", () => { r.name = L.seenName; L.seenName = null; commit(); render(); buildLivePanel(); });
   on("liveStop", "onclick", () => stopWalk("Stopped by you."));
   on("liveFollow", "onchange", e => { L.follow = e.target.checked; saveLive(); if (L.follow && r) followTo(r); });
-  on("liveWindow", "onchange", e => { L.window = clamp(parseInt(e.target.value, 10) || 5, 1, 20); e.target.value = L.window; saveLive(); });
-  on("liveStall", "onchange", e => { L.stallSec = clamp(parseInt(e.target.value, 10) || 20, 5, 300); e.target.value = L.stallSec; saveLive(); });
   on("liveForget", "onclick", () => setHere(null));
+  wireStepper("liveWindow", v => { L.window = clamp(v, 1, 20); saveLive(); return L.window; });
+  wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
+}
+// − value +  (the stall timeout steps by 5s above 10s)
+function stepper(id, value, unit) {
+  return `<div class="livestep" id="${id}"><button data-d="-1" aria-label="Less">−</button>` +
+    `<span>${value}${unit ? `<small>${unit}</small>` : ""}</span><button data-d="1" aria-label="More">+</button></div>`;
+}
+function wireStepper(id, apply) {
+  const el = document.getElementById(id);
+  const span = el.querySelector("span"), unit = span.querySelector("small");
+  el.querySelectorAll("button").forEach(b => b.onclick = () => {
+    const cur = parseInt(span.firstChild.textContent, 10);
+    const up = b.dataset.d > 0;
+    const step = id === "liveStall" && (up ? cur >= 10 : cur > 10) ? 5 : 1;
+    const next = apply(cur + (up ? step : -step));
+    span.firstChild.textContent = next;
+    if (unit) span.appendChild(unit);
+  });
 }
 document.getElementById("liveBtn").onclick = () => {
   const panel = document.getElementById("livePanel");
@@ -330,6 +382,27 @@ document.getElementById("liveBtn").onclick = () => {
   buildLivePanel();
   positionPopover(panel, document.getElementById("liveBtn"));
 };
+
+// ---------- Bridge updates ----------
+// Userscript managers only look for updates about once a day, so tell bridge users when the file
+// this site serves is newer than what they run. The Update link opens the manager's update screen.
+function cmpVer(a, b) {
+  const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+function bridgeOutdated() { return !!(L.bridgeV && L.latestV && cmpVer(L.latestV, L.bridgeV) > 0); }
+async function checkBridgeVersion() {
+  try {
+    const src = await (await fetch(BRIDGE_URL, { cache: "no-cache" })).text();
+    const m = /@version\s+([\d.]+)/.exec(src);
+    if (m) L.latestV = m[1];
+  } catch (e) { /* offline or not deployed with the file: just don't nag */ }
+  updateChip(); refreshLivePanel();
+}
 
 // ---------- Install offer ----------
 // Only for people who already run userscripts: PbN Compass Tools (from the PbN scripts repo) marks
@@ -364,6 +437,8 @@ window.addEventListener("message", e => {
   if (m.type === "hello") {
     const first = !L.bridge;
     L.bridge = true;
+    L.bridgeV = m.v ? String(m.v) : null;
+    if (first) checkBridgeVersion();
     updateChip();
     document.getElementById("bridgeOffer").style.display = "none";
     if (first) render();   // the inspector and path box grow live buttons
