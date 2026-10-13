@@ -10,6 +10,7 @@ import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
 import { computePath, findPath } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
+import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
 
 // ---------- Live link to the MUSH web client ----------
 // The MUSH client is another site, so this page can't touch it. The bridge userscript
@@ -148,6 +149,7 @@ function onRoom(snap) {
     if (found && found !== cur) setHere(found.id, snap.name);
   }
   if (automapOn()) autoFill(hereRoom(), snap);
+  checkRoom(hereRoom(), snap);   // issues.js: where map and game disagree
 }
 
 // ---------- Auto-map (hidden: only while the URL has #automap) ----------
@@ -229,6 +231,7 @@ function autoFill(r, snap) {
 
 function onMove(word, name) {
   const dir = DIR_OF[(word || "").toLowerCase()] || null;
+  if (dir && hereRoom()) noteArrived(hereRoom(), dir, name);
   if (W) {
     const exp = W.steps[W.done];
     if (dir !== exp.dir) {
@@ -401,7 +404,9 @@ function updateChip() {
   const alive = clientAlive();
   btn.classList.toggle("live-on", alive);
   btn.classList.toggle("live-update", bridgeOutdated());
-  btn.textContent = (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab") + (automapOn() ? " · 🤖" : "");
+  const issues = issueCount();
+  btn.textContent = (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab") +
+    (issues ? ` · ⚠${issues}` : "") + (automapOn() ? " · 🤖" : "");
   btn.title = bridgeOutdated() ? "A newer version of the bridge userscript is available. Click to update." :
     W ? "Walking a route. Click for details or to stop." :
     alive ? "Linked to the MUSH client: following your position." :
@@ -436,10 +441,6 @@ function buildLivePanel() {
     : `<div class="livelabel">You are in</div>
        <div class="livesub">Unknown. Move once in the game, or select your room and press <b>📍 I'm here</b>.</div>`) +
     `</div>`;
-  if (r && L.seenName) {
-    h += `<div class="livecard livewarn"><div>The game calls this room <b>“${escapeHtml(L.seenName)}”</b>.</div>
-      <button class="livebtn" id="liveRename">Rename tile</button></div>`;
-  }
   if (W) {
     const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
     const pct = Math.round(W.done / W.steps.length * 100);
@@ -449,6 +450,7 @@ function buildLivePanel() {
       <div class="liveprog"><span style="width:${pct}%"></span></div>
       <div class="livesub">${W.done} of ${W.steps.length} steps</div></div>`;
   }
+  h += issuesHtml();
   const gn = ghostCount(), gd = dismissedCount();
   if (gn || gd) {
     h += `<div class="livelabel livesettings">Ghost tiles</div>` +
@@ -475,11 +477,11 @@ function buildLivePanel() {
 
   const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
   on("liveGoto", "onclick", () => gotoRoom(r.id));
-  on("liveRename", "onclick", () => { r.name = L.seenName; L.seenName = null; commit(); render(); buildLivePanel(); });
   on("liveStop", "onclick", () => stopWalk("Stopped by you."));
   on("liveFollow", "onchange", e => { L.follow = e.target.checked; saveLive(); if (L.follow && r) followTo(r); });
   on("liveForget", "onclick", () => setHere(null));
   on("liveGhostClear", "onclick", () => { clearGhosts(); buildLivePanel(); });
+  wireIssues(body, buildLivePanel);
   on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
@@ -582,6 +584,7 @@ window.addEventListener("message", e => {
   }
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
+onIssuesChange(() => { updateChip(); refreshLivePanel(); });
 window.addEventListener("hashchange", () => { updateChip(); if (automapOn()) toast("🤖 Auto-map on"); });
 loadLive();
 post("probe");
