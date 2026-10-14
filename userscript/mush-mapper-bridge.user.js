@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.0
+// @version      1.6.1
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -44,7 +44,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.6.0';
+  const VERSION = '1.6.1';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -197,7 +197,12 @@
       // can't be mistaken for this one's.
       const wrap = document.querySelector('.room-image');
       const imgOk = !!wrap && wrap.getAttribute('aria-label') === 'Room image: ' + name;
-      const img = imgOk ? wrap.querySelector('img.q-img__image') : null;
+      // The image box cross-fades: for a moment it holds the old image (fading out) and the new one
+      // (still loading), while its label already names the new room. Only once a single, loaded
+      // image is left is that image this room's.
+      const imgs = wrap ? [...wrap.querySelectorAll('img.q-img__image')] : [];
+      const settled = imgs.length === 1 && imgs[0].classList.contains('q-img__image--loaded');
+      const img = imgOk && settled ? imgs[0] : null;
       const descEl = document.querySelector('.info-tab .room-description');
       const exits = {};
       document.querySelectorAll('.compass .compass__cell, .vertical-exits .vertical-exit-btn').forEach(el => {
@@ -216,7 +221,7 @@
         name,
         description: descEl ? descEl.textContent.trim() : '',
         image: img ? (img.getAttribute('src') || '') : '',
-        imageReady: imgOk || !wrap,
+        imageReady: !wrap || !!img,
         exits, grid,
       };
     }
@@ -224,19 +229,23 @@
     // The chat line and the panel update at roughly the same time, in either order: poll briefly
     // until the panel shows the room we expect. A newer move cancels an older wait.
     let roomToken = 0;
+    // A large image can take seconds: after ~1.5s everything else is sent without it, and the
+    // image follows in a second snapshot once it has loaded (up to ~8s).
     async function reportRoom(expectName) {
       const token = ++roomToken;
       await tick(100);
-      let snap = null;
-      for (let i = 0; i < 30; i++) {
+      let early = false;
+      for (let i = 0; i < 160; i++) {
         if (token !== roomToken) return;
-        snap = readRoom();
-        if (snap && (!expectName || snap.name === expectName) && snap.imageReady) break;
+        const snap = readRoom();
+        if (snap && (!expectName || snap.name === expectName)) {
+          const ready = snap.imageReady;
+          delete snap.imageReady;
+          if (ready) { push({ kind: 'room', room: snap }); return; }
+          if (!early && i >= 30) { early = true; push({ kind: 'room', room: { ...snap, image: '' } }); }
+        }
         await tick(50);
       }
-      if (token !== roomToken || !snap || (expectName && snap.name !== expectName)) return;
-      delete snap.imageReady;
-      push({ kind: 'room', room: snap });
     }
 
     // --- typing commands (same approach as pbn-command-buttons) ---
