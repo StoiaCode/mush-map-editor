@@ -10,11 +10,12 @@ import { gotoRoom } from "./inspector.js";
 // Where your map and the game disagree, collected while you walk. Exits are compared by the
 // destination NAME the game's compass shows, never by grid position: exits can lead several
 // tiles away. Both directions: what the map has that the game doesn't, and the other way round.
+// Not checked: an exit on the map that the game's compass doesn't show. Flight, hidden and locked
+// exits made that one wrong far more often than right.
 // Kept per browser; an entry disappears by itself once the disagreement is gone (checked again
 // whenever you're back in that room), and a dismissed one stays dismissed while it's unchanged.
 //
 // Entry: { type, roomId, dir, game, mapTo, at }
-//   extra      map has exit dir, the game shows none                     fix: remove the exit
 //   other      map's dir leads to mapTo, the game's to `game`             fix: relink (unique name)
 //   fly / nofly  the game says flight-only / a normal exit, map disagrees  fix: (un)mark ✈
 //   missing    the game has exit dir to `game`, map has nothing           fix: link (unique name) or
@@ -33,6 +34,7 @@ function load() {
   try {
     const o = JSON.parse(localStorage.getItem(ISSUE_KEY) || "{}");
     if (o.items && typeof o.items === "object") I.items = o.items;
+    for (const [k, e] of Object.entries(I.items)) if (e.type === "extra") delete I.items[k];   // no longer checked
     if (o.dismissed && typeof o.dismissed === "object") I.dismissed = o.dismissed;
   } catch (e) { /* no storage: the list just starts empty each visit */ }
 }
@@ -68,8 +70,7 @@ export function checkRoom(r, snap) {
     for (const d of DIRS) {
       const mapT = r.exits[d] ? S.map.rooms[r.exits[d]] : null;
       const g = exits[d] || null;
-      if (mapT && !g) put({ type: "extra", roomId: r.id, dir: d, mapTo: mapT.name });
-      else if (mapT && g) {
+      if (mapT && g) {
         if (g.name && g.name !== mapT.name) put({ type: "other", roomId: r.id, dir: d, mapTo: mapT.name, game: g.name });
         const fly = !!(r.exitFly && r.exitFly[d]);
         if (g.aerial && !fly) put({ type: "fly", roomId: r.id, dir: d, mapTo: mapT.name });
@@ -113,7 +114,6 @@ const D = d => DIRWORD[d] || d;
 function describe(e, room) {
   const at = `<b>${escapeHtml(room.name)}</b>`, t = s => `<b>${escapeHtml(s)}</b>`;
   switch (e.type) {
-    case "extra":   return `${at}: your map goes ${D(e.dir)} to ${t(e.mapTo)}, the game shows no exit ${D(e.dir)}.`;
     case "other":   return `${at}: ${D(e.dir)} goes to ${t(e.game)} in the game, to ${t(e.mapTo)} on your map.`;
     case "fly":     return `${at}: ${D(e.dir)} is flight-only in the game, a normal exit on your map.`;
     case "nofly":   return `${at}: ${D(e.dir)} is a normal exit in the game, flight-only on your map.`;
@@ -128,7 +128,6 @@ function describe(e, room) {
 // [label, action] or null
 function fixFor(e, room) {
   switch (e.type) {
-    case "extra": return ["Remove exit", () => { delete room.exits[e.dir]; if (room.exitFly) delete room.exitFly[e.dir]; }];
     case "other": case "arrived": {
       const to = uniqueNamed(e.game);
       return to ? [`Relink to ${to.name}`, () => { room.exits[e.dir] = to.id; }] : null;
