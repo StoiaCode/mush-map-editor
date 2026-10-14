@@ -55,6 +55,7 @@ const L = {
   latestV: null,      // @version of the bridge file this site serves
   gotoList: [],       // room ids of the last numbered //goto list, for "//goto 2"
   gotoFly: false,     // ...and whether that list was a "//goto fly" one
+  gotoPreview: false, // ...or a "//goto ?" one
   riding: null,       // name of the train line you're aboard, from "You step aboard the ..."
 };
 let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
@@ -441,7 +442,32 @@ function matchRooms(q) {
 function routeTo(fromId, toId, fly) {
   return findPath(fromId, toId, fly, false) || findPath(fromId, toId, fly, true);
 }
-function gotoRoomFromGame(target, fly) {
+// "south south | east · 🚆 Broad Street Line to Northbound Platform · east": walk steps in the
+// chains the walker would send, flown steps marked ✈, trains spelled out.
+function routeText(res) {
+  const parts = [];
+  let chain = [];
+  const flush = () => {
+    for (let i = 0; i < chain.length; i += L.window) parts.push(chain.slice(i, i + L.window).join(" "));
+    chain = [];
+  };
+  for (const st of res.steps) {
+    if (st.type === "train") { flush(); parts.push(`🚆 ${st.lineName} to ${S.map.rooms[st.toId].name}`); }
+    else chain.push(DIRWORD[st.dir] + (st.fly ? "✈" : ""));
+  }
+  flush();
+  return parts.join(" | ");
+}
+const GOTO_HELP = [
+  "//goto <room> — walk there; every word you type must be in the room's name",
+  "//goto fly <room> — also use flight exits (/stalk first)",
+  "//goto ? <room> — show the route without walking (also: //goto ? fly <room>)",
+  "//goto <number> — pick from the last list",
+  "//goto stop — stop walking (cancels a train wait or stop)",
+  "//goto — where the mapper thinks you are",
+];
+
+function gotoRoomFromGame(target, fly, preview = false) {
   const here = hereRoom();
   if (!here) return reply("I don't know where you are yet. Move once, or press 📍 I'm here in the mapper.");
   if (here.id === target.id) return reply(`You're already in ${target.name}.`);
@@ -456,11 +482,18 @@ function gotoRoomFromGame(target, fly) {
   const flown = res.steps.filter(s => s.fly).length;
   S.pathCanFly = !!fly;              // the route box shows what's actually walked
   computePath(here.id, target.id);   // show it in the mapper too
+  const summary = `${walkSteps} step${walkSteps !== 1 ? "s" : ""}` + (flown ? ` (${flown} flown)` : "") +
+    (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "");
+  if (preview) {
+    // "//goto 1" walks exactly this room, even when other rooms share its name
+    L.gotoList = [target.id]; L.gotoFly = !!fly; L.gotoPreview = false;
+    const unique = Object.values(S.map.rooms).filter(r => r.name === target.name).length === 1;
+    return reply(`Route to ${target.name}: ${summary}.`, routeText(res),
+      (unique ? `//goto ${fly ? "fly " : ""}${target.name} or ` : "") + "//goto 1 to walk it.");
+  }
   startWalk(res, true);
   if (!W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
-  reply(`Walking to ${target.name}: ${walkSteps} step${walkSteps !== 1 ? "s" : ""}` +
-    (flown ? ` (${flown} flown)` : "") +
-    (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "") + ". //goto stop to stop.");
+  reply(`Walking to ${target.name}: ${summary}. //goto stop to stop.`);
 }
 function onGoto(q) {
   if (!S.map) return;
@@ -473,21 +506,24 @@ function onGoto(q) {
     if (!W) return reply("Not walking.");
     return stopWalk("Stopped from the game.");
   }
+  if (/^(help|\?)$/i.test(q)) return reply(...GOTO_HELP);
   if (/^\d+$/.test(q) && L.gotoList.length) {
     const r = S.map.rooms[L.gotoList[parseInt(q, 10) - 1]];
-    return r ? gotoRoomFromGame(r, L.gotoFly) : reply(`Pick a number from 1 to ${L.gotoList.length}.`);
+    return r ? gotoRoomFromGame(r, L.gotoFly, L.gotoPreview) : reply(`Pick a number from 1 to ${L.gotoList.length}.`);
   }
-  // "//goto fly <room>": the first word switches flight on (a room starting with "fly": "//goto fly fly trap")
-  let fly = false;
-  const fm = /^fly(?:\s+([\s\S]*))?$/i.exec(q);
-  if (fm) {
-    fly = true;
-    q = (fm[1] || "").trim();
-    if (!q) return reply("Where to? //goto fly <room>");
+  // Leading switches, in any order: "fly" allows flight exits, "?" previews without walking.
+  // Only the first of each counts, so a room starting with "fly" is "//goto fly fly trap".
+  let fly = false, preview = false, m;
+  while ((m = /^(fly|\?)(?:\s+|$)/i.exec(q))) {
+    const isFly = m[1].toLowerCase() === "fly";
+    if (isFly ? fly : preview) break;
+    if (isFly) fly = true; else preview = true;
+    q = q.slice(m[0].length).trim();
   }
+  if (!q) return reply(`Where to? //goto ${preview ? "? " : ""}${fly ? "fly " : ""}<room>`);
   const hits = matchRooms(q);
   if (!hits.length) return reply(`Nothing on your map matches "${q}".`);
-  if (hits.length === 1) return gotoRoomFromGame(hits[0], fly);
+  if (hits.length === 1) return gotoRoomFromGame(hits[0], fly, preview);
   // several: nearest first, with where they are and how far, so duplicates can be told apart
   const here = hereRoom();
   const rows = hits.map(r => {
@@ -497,10 +533,11 @@ function onGoto(q) {
   const shown = rows.slice(0, 8);
   L.gotoList = shown.map(x => x.r.id);
   L.gotoFly = fly;
+  L.gotoPreview = preview;
   reply(`${hits.length} rooms match "${q}":`,
     ...shown.map((x, i) => `${i + 1}. ${x.r.name} · ${roomLocation(x.r)}` +
       (x.steps === Infinity ? (here ? " · no route" : "") : x.steps === 0 ? " · you are here" : ` · ${x.steps} step${x.steps !== 1 ? "s" : ""}`)),
-    (hits.length > shown.length ? `…and ${hits.length - shown.length} more. ` : "") + `Type //goto <number> to pick one${fly ? " (flying)" : ""}, or be more specific.`);
+    (hits.length > shown.length ? `…and ${hits.length - shown.length} more. ` : "") + `Type //goto <number> to pick one${fly ? " (flying)" : ""}${preview ? " (route only)" : ""}, or be more specific.`);
 }
 
 // ---------- Toolbar chip + panel ----------
