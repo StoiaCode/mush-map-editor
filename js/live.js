@@ -153,6 +153,10 @@ function anchor(snap) {
 }
 function onRoom(snap) {
   if (!snap || typeof snap.name !== "string") return;
+  // A flight exit's compass label can name the room next door on the grid ("Go east to X
+  // (aerial)"), but flight exits often skip several tiles: that name says nothing about where it
+  // goes. Dropped here, before anything compares or links by it (issues.js, autoFill).
+  for (const ex of Object.values(snap.exits || {})) if (ex && ex.aerial) ex.name = null;
   L.snap = snap;
   const cur = hereRoom();
   if (!cur || cur.name !== snap.name) {
