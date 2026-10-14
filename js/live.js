@@ -757,16 +757,18 @@ window.addEventListener("message", e => {
     L.clientAt = Date.now();
     if (m.char) setCharacter(String(m.char));
     updateChip(); refreshLivePanel();
-  } else if (["move", "sys", "train", "gather"].includes(m.type) && S.map) {
+  } else if (["move", "sys", "train", "gather", "room"].includes(m.type) && S.map) {
     queueGameEvent(m);
-  } else if (m.type === "room" && S.map) {
-    onRoom(m.room);
   } else if (m.type === "goto") {
     onGoto(m.q);
   }
 });
 // Safety net against replayed chat (bridges before 1.6.2 re-read the whole chat when you switched
 // chat tabs): in-game moves take time, so game events never come fractions of a second apart.
+// Panel snapshots ("room") go through the same queue so they're never handled before the move
+// they belong to (a snapshot overtaking its move made the move look like it started from its own
+// destination). They don't count toward a burst and are kept even in one: they show the panel as
+// it really is.
 // They're held for a moment; BURST_N or more in one rush are a replay and are dropped together.
 const BURST_N = 4, BURST_QUIET_MS = 150;
 let gameQ = [], gameTimer = null;
@@ -774,13 +776,15 @@ function queueGameEvent(m) {
   gameQ.push(m);
   clearTimeout(gameTimer);
   gameTimer = setTimeout(() => {
-    const q = gameQ; gameQ = [];
-    if (q.length >= BURST_N) {
-      toast(`⚠ Ignored ${q.length} game lines that arrived at once (old chat shown again?). Update the bridge if this repeats.`);
-      return;
+    let q = gameQ; gameQ = [];
+    const lines = q.filter(e => e.type !== "room").length;
+    if (lines >= BURST_N) {
+      toast(`⚠ Ignored ${lines} game lines that arrived at once (old chat shown again?). Update the bridge if this repeats.`);
+      q = q.filter(e => e.type === "room");
     }
     for (const e of q) {
-      if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
+      if (e.type === "room") onRoom(e.room);
+      else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
       else if (e.type === "sys") onSys(String(e.text || ""));
       else if (e.type === "train") onTrain(String(e.text || ""));
       else if (e.type === "gather") { onGather(String(e.text || "")); refreshLivePanel(); }
