@@ -1,7 +1,7 @@
 import { DIRWORD, VEC, COMPASS, GRID_N } from "./constants.js";
 import { S, viewport } from "./state.js";
 import { escapeHtml, clamp } from "./utils.js";
-import { spaceOf, curSpace, roomAtCell, createRoom } from "./model.js";
+import { spaceOf, curSpace, roomAtCell, createRoom, deleteRoom } from "./model.js";
 import { commit } from "./persistence.js";
 import { render } from "./app.js";
 import { centerOnRoom, roomWorldCenter } from "./render-flat.js";
@@ -205,7 +205,7 @@ function autoStep(from, dir, name) {
   const [dx, dy] = dir === "UP" || dir === "DOWN" ? [0, 0] : VEC[dir];
   const dz = dir === "UP" ? 1 : dir === "DOWN" ? -1 : 0;
   const r = createRoom(from.z + dz, from.x + dx, from.y + dy, name, spaceOf(from));
-  r.auto = true;
+  r.auto = true; r.autoAt = Date.now();
   linkOneWay(from, dir, r, fly);
   commit();
   return r;
@@ -616,6 +616,15 @@ function buildLivePanel() {
       (gd ? `<div class="livesetting"><div><div>${gd} dismissed</div><div class="livesub">Won't come back until reset</div></div>
         <button class="livebtn" id="liveGhostReset">Reset</button></div>` : "");
   }
+  const autos = Object.values(S.map.rooms).filter(x => x.auto);
+  if (autos.length) {
+    const recent = autos.filter(x => x.autoAt && Date.now() - x.autoAt < 3600e3).length;
+    h += `<div class="livelabel livesettings">Auto-created rooms</div>
+      <div class="livesetting"><div><div>${autos.length} not verified yet</div><div class="livesub">Made by auto-map, not marked ✓ Verified</div></div></div>
+      <div class="histbtns">` +
+      (recent ? `<button class="livebtn" id="autoDelRecent" title="Delete the unverified rooms auto-map made in the last hour">Delete last hour (${recent})</button>` : "") +
+      `<button class="livebtn danger" id="autoDelAll" title="Delete every unverified auto-created room">Delete all (${autos.length})</button></div>`;
+  }
   h += `<div class="livelabel livesettings">Gathering</div>` + gatherHtml();
   h += historyHtml();
   h += `<div class="livelabel livesettings">Settings</div>
@@ -641,10 +650,24 @@ function buildLivePanel() {
   on("liveForget", "onclick", () => setHere(null));
   on("liveGhostClear", "onclick", () => { clearGhosts(); buildLivePanel(); });
   wireIssues(body, buildLivePanel);
+  on("autoDelRecent", "onclick", () => deleteAutoRooms(true));
+  on("autoDelAll", "onclick", () => deleteAutoRooms(false));
   wireHistory();
   on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
+}
+// Unverified auto-created rooms, all or just the last hour's: one undo step brings them back.
+function deleteAutoRooms(recentOnly) {
+  const ids = Object.values(S.map.rooms)
+    .filter(x => x.auto && (!recentOnly || (x.autoAt && Date.now() - x.autoAt < 3600e3))).map(x => x.id);
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} unverified auto-created room${ids.length !== 1 ? "s" : ""}` +
+    `${recentOnly ? " from the last hour" : ""}? Exits to them are removed too. Ctrl+Z undoes it.`)) return;
+  for (const id of ids) deleteRoom(id);
+  if (S.here && !S.map.rooms[S.here]) setHere(null);
+  commit(); render(); buildLivePanel();
+  toast(`🗑 Deleted ${ids.length} auto-created room${ids.length !== 1 ? "s" : ""}.`);
 }
 // − value +  (the stall timeout steps by 5s above 10s)
 function stepper(id, value, unit) {
@@ -734,21 +757,36 @@ window.addEventListener("message", e => {
     L.clientAt = Date.now();
     if (m.char) setCharacter(String(m.char));
     updateChip(); refreshLivePanel();
-  } else if (m.type === "move" && S.map) {
-    onMove(String(m.dir || ""), String(m.name || ""));
+  } else if (["move", "sys", "train", "gather"].includes(m.type) && S.map) {
+    queueGameEvent(m);
   } else if (m.type === "room" && S.map) {
     onRoom(m.room);
   } else if (m.type === "goto") {
     onGoto(m.q);
-  } else if (m.type === "sys") {
-    onSys(String(m.text || ""));
-  } else if (m.type === "train" && S.map) {
-    onTrain(String(m.text || ""));
-  } else if (m.type === "gather") {
-    onGather(String(m.text || ""));
-    refreshLivePanel();
   }
 });
+// Safety net against replayed chat (bridges before 1.6.2 re-read the whole chat when you switched
+// chat tabs): in-game moves take time, so game events never come fractions of a second apart.
+// They're held for a moment; BURST_N or more in one rush are a replay and are dropped together.
+const BURST_N = 4, BURST_QUIET_MS = 150;
+let gameQ = [], gameTimer = null;
+function queueGameEvent(m) {
+  gameQ.push(m);
+  clearTimeout(gameTimer);
+  gameTimer = setTimeout(() => {
+    const q = gameQ; gameQ = [];
+    if (q.length >= BURST_N) {
+      toast(`⚠ Ignored ${q.length} game lines that arrived at once (old chat shown again?). Update the bridge if this repeats.`);
+      return;
+    }
+    for (const e of q) {
+      if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
+      else if (e.type === "sys") onSys(String(e.text || ""));
+      else if (e.type === "train") onTrain(String(e.text || ""));
+      else if (e.type === "gather") { onGather(String(e.text || "")); refreshLivePanel(); }
+    }
+  }, BURST_QUIET_MS);
+}
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
 onIssuesChange(() => { updateChip(); refreshLivePanel(); });
 onHistoryChange(() => refreshLivePanel());

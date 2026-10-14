@@ -159,7 +159,8 @@ export function issuesHtml() {
       (fix ? `<button class="livebtn primary" data-act="fix">${escapeHtml(fix[0])}</button>` : "") +
       `<button class="liveicon" data-act="dismiss" title="Dismiss">✕</button></div></div>`;
   };
-  let h = `<div class="livelabel livesettings">Things to check${main.length ? ` (${main.length})` : ""}</div>`;
+  let h = `<div class="livelabel livesettings issue-hdr">Things to check${main.length ? ` (${main.length})` : ""}` +
+    `<button class="linkbtn" id="issueClearAll" title="Dismiss every entry in this list">dismiss all</button></div>`;
   h += main.map(row).join("");
   if (low.length) {
     h += `<button class="issue-low" id="issueLowToggle">${lowOpen ? "▾" : "▸"} Descriptions &amp; images (${low.length})</button>`;
@@ -168,6 +169,12 @@ export function issuesHtml() {
   return h;
 }
 export function wireIssues(container, rebuild) {
+  const all = container.querySelector("#issueClearAll");
+  if (all) all.onclick = () => {
+    for (const [k, e] of Object.entries(I.items)) I.dismissed[k] = sigOf(e);
+    I.items = {};
+    save(); onChange(); rebuild();
+  };
   const t = container.querySelector("#issueLowToggle");
   if (t) t.onclick = () => { lowOpen = !lowOpen; rebuild(); };
   container.querySelectorAll(".issue").forEach(el => {

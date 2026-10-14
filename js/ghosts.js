@@ -64,7 +64,7 @@ function makeReal(k) {
   const g = G.ghosts[k];
   if (!g || roomAtCell(g.z, g.x, g.y, g.space)) return;
   const r = createRoom(g.z, g.x, g.y, g.name, g.space);
-  r.auto = true;
+  r.auto = true; r.autoAt = Date.now();
   delete G.ghosts[k]; save();
   selectSingle(r.id);
   commit(); render();

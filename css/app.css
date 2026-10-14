@@ -614,3 +614,7 @@ select { cursor: pointer; }
 #histlayer .histname { font-size: 13px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: #0f1115; stroke-width: 4px; }
 .histbtns { display: flex; gap: 6px; margin: 4px 0 2px; }
 @media (max-width: 760px) { #historyBar { right: 10px; } .hb-time { min-width: 0; } }
+.issue-hdr { display: flex; align-items: center; }
+.linkbtn { margin-left: auto; padding: 0; border: none; background: none; font-size: 10px; font-weight: 600;
+  text-transform: none; letter-spacing: 0; color: var(--muted); text-decoration: underline dotted; cursor: pointer; }
+.linkbtn:hover { color: var(--text); }

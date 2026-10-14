@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.1
+// @version      1.6.2
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -44,7 +44,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.6.1';
+  const VERSION = '1.6.2';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -389,24 +389,46 @@
     let chatObserver = null;
     let waiter = null;
 
+    // Only messages that arrive live may be acted on. PbN rebuilds the whole list with new
+    // elements when you switch chat tabs (RP / Activity), and every old "You move" line would
+    // look new. So: a tab click mutes the watcher for a moment, more than BULK messages in one go
+    // is a rebuild (live chat comes a line or two at a time), and a swapped-out chat box is
+    // re-attached with everything in it counted as old.
+    const BULK = 3, TAB_MUTE_MS = 2000;
+    let mutedUntil = 0, chatBox = null;
+    document.addEventListener('click', e => {
+      if (e.target.closest && e.target.closest('.chat-tab, [role="tab"]')) mutedUntil = Date.now() + TAB_MUTE_MS;
+    }, true);
     function mount() {
       const container = document.querySelector(CHAT_SELECTOR);
       if (!container) return false;
+      if (chatObserver) chatObserver.disconnect();
+      chatBox = container;
       // lines already on screen are history, not moves happening now
       container.querySelectorAll(ARTICLE_SELECTOR).forEach(el => seen.add(el));
       chatObserver = new MutationObserver(mutations => {
+        const added = [];
         for (const m of mutations) {
           for (const node of m.addedNodes) {
             if (node.nodeType !== 1) continue;
-            if (node.matches(ARTICLE_SELECTOR)) processArticle(node);
-            else node.querySelectorAll(ARTICLE_SELECTOR).forEach(processArticle);
+            if (node.matches(ARTICLE_SELECTOR)) added.push(node);
+            else node.querySelectorAll(ARTICLE_SELECTOR).forEach(a => added.push(a));
           }
         }
+        const fresh = added.filter(a => !seen.has(a));
+        if (Date.now() < mutedUntil || fresh.length > BULK) { fresh.forEach(a => seen.add(a)); return; }
+        fresh.forEach(processArticle);
       });
       chatObserver.observe(container, { childList: true, subtree: true });
       reportRoom(null);   // where we are right now, so the mapper can anchor without a move
       return true;
     }
+    // PbN may also replace the chat box itself; pick the new one up (its contents count as old)
+    setInterval(() => {
+      if (!onPlay || !chatBox) return;
+      const now = document.querySelector(CHAT_SELECTOR);
+      if (now && now !== chatBox) mount();
+    }, 500);
 
     function watchRoute(isActiveRoute, enter, exit) {
       let active = null;
