@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.4.0
+// @version      1.5.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -32,6 +32,9 @@
 //                                                "You are moving too quickly. Slow down." and the like
 //                {seq, kind:'train', text}       a /train line: waiting, aboard, stop set, arriving,
 //                                                doors closing, stepped off
+//                {seq, kind:'gather', text}      "/scavenge" or "/harvest" was just sent (still goes to
+//                                                the game), or its result: "[You haul away 2 units of
+//                                                paper stock.]", "There is nothing worth scavenging here."
 //   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
 //   mm_ping / mm_pong {id}                   is a PbN tab there?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
@@ -41,7 +44,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -83,6 +86,7 @@
         else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q }); }
         else if (ev.kind === 'sys') toPage('sys', { text: ev.text });
         else if (ev.kind === 'train') toPage('train', { text: ev.text });
+        else if (ev.kind === 'gather') toPage('gather', { text: ev.text });
         else toPage('move', { dir: ev.dir, name: ev.name });
       }
     });
@@ -109,6 +113,12 @@
     // Confirmed /train lines, e.g. "You step aboard the Broad Street Line. ...",
     // "The brakes bite and the train slows. Now arriving: Ellsworth-Federal Station. The doors open."
     const TRAIN_RE = /^(?:You wait for the next train|You step aboard the |You will step off at |You step off onto |The brakes bite.*Now arriving: |The chime sounds\. The doors close on )/;
+    // Confirmed: "[You haul away 2 units of paper stock.]", "[You gather 1 unit of ritual herbs.]",
+    // "There is nothing worth scavenging here.", "There is nothing of ritual use to gather here."
+    // Aloft: "There is nothing to scavenge in the open air. ...", "There is nothing to gather here but empty air. ..."
+    // Nightly cap: "You have gathered all the night will give you. ..." (harvest),
+    // "You have pushed your luck across the city enough for one night. ..." (scavenge)
+    const GATHER_RE = /\[You (?:haul away|gather) \d+ units? of [^\]]+?\.\]|^There is nothing (?:worth scavenging|of ritual use to gather|to scavenge in the open air|to gather here but empty air)|^You have (?:gathered all the night will give you|pushed your luck across the city enough for one night)/;
     const REFUSED_RE = /^You (?:can't|cannot|can not|are moving too quickly)\b/i;
 
     const tabId = Math.random().toString(36).slice(2);
@@ -155,6 +165,8 @@
         return;
       }
       if (text && REFUSED_RE.test(text)) { push({ kind: 'sys', text }); return; }
+      // the haul line sits in the same message, after a <br>: "...what you need.\n[You gather 1 unit of ritual herbs.]"
+      if (text && GATHER_RE.test(text)) { push({ kind: 'gather', text: text.match(GATHER_RE)[0] }); return; }
       if (text && TRAIN_RE.test(text)) {
         push({ kind: 'train', text });
         const off = /^You step off onto (.+?)\.$/.exec(text);
@@ -297,6 +309,9 @@
       if (!onPlay || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
       const input = e.target;
       if (!input || input.tagName !== 'TEXTAREA' || input !== findInput()) return;
+      // /scavenge and /harvest are only noted, not stopped: the mapper times the result from here
+      const gather = /^\/(scavenge|harvest)\b/i.exec(input.value.trim());
+      if (gather) { push({ kind: 'gather', text: '/' + gather[1].toLowerCase() }); return; }
       const m = GOTO_RE.exec(input.value.trim());
       if (!m) return;
       e.preventDefault();

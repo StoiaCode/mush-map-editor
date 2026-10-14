@@ -9,6 +9,7 @@ import { loadRoomImage } from "./image-loader.js";
 import { captureClass } from "./capture.js";
 import { drawReleaseGhost } from "./release.js";
 import { drawGhosts } from "./ghosts.js";
+import { tappedTonight } from "./gather.js";
 
 // ---------- Layer navigation ----------
 export function setLayer(z) {
@@ -383,7 +384,14 @@ export function makeRoomEl(r, ghost) {
     if (doors.length) el.appendChild(doorBadge(doors));
     const lines = stationLinesFor(r.id);
     if (lines.length) el.appendChild(trainBadge(lines));
-    if (r.traits && r.traits.length) { const b = traitBadge(r.traits); if (b) el.appendChild(b); }
+    if (r.traits && r.traits.length) {
+      const b = traitBadge(r.traits);
+      if (b) {
+        // scavenged/harvested here tonight: tapped out until 17:00 Berlin time (gather.js)
+        if (tappedTonight(r.id)) { b.classList.add("tapped"); b.title += " · tapped out tonight"; }
+        el.appendChild(b);
+      }
+    }
   }
   return el;
 }

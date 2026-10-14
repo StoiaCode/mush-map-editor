@@ -12,6 +12,7 @@ import { stationLinesFor } from "./model.js";
 import { computePath, findPath } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
+import { onGather, gatherHtml } from "./gather.js";
 
 // ---------- Live link to the MUSH web client ----------
 // The MUSH client is another site, so this page can't touch it. The bridge userscript
@@ -22,6 +23,7 @@ import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesCha
 //                  {mm:"bridge", type:"goto", q}             "//goto <q>" typed in the PbN client
 //                  {mm:"bridge", type:"sys", text}           the game refused a move ("You can't go that way.")
 //                  {mm:"bridge", type:"train", text}         a /train line (see Trains below)
+//                  {mm:"bridge", type:"gather", text}        /scavenge or /harvest sent, or its result (gather.js)
 //                  {mm:"bridge", type:"room", room}          the side panel caught up: {name, description,
 //                                                            image, exits:{N:{name,locked,aerial}}, grid:{N:name}}
 //   page → bridge  {mm:"page", type:"probe"}                 ask for a hello
@@ -82,6 +84,8 @@ function post(type, data = {}) { window.postMessage({ mm: "page", type, ...data 
 // ---------- Position ----------
 const norm = s => (s || "").toLowerCase().replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
 export function hereRoom() { return S.here ? S.map.rooms[S.here] || null : null; }
+// known position whose name agrees with the game's: safe to write things onto that room
+export function positionSure() { return !!hereRoom() && !L.seenName; }
 
 function neighbourCell(r, dir) {
   if (dir === "UP" || dir === "DOWN") return roomAtCell(r.z + (dir === "UP" ? 1 : -1), r.x, r.y, spaceOf(r));
@@ -606,6 +610,7 @@ function buildLivePanel() {
       (gd ? `<div class="livesetting"><div><div>${gd} dismissed</div><div class="livesub">Won't come back until reset</div></div>
         <button class="livebtn" id="liveGhostReset">Reset</button></div>` : "");
   }
+  h += `<div class="livelabel livesettings">Gathering</div>` + gatherHtml();
   h += `<div class="livelabel livesettings">Settings</div>
     <div class="livesetting">
       <div><div>Follow my position</div><div class="livesub">Keep the map centred on you</div></div>
@@ -730,6 +735,9 @@ window.addEventListener("message", e => {
     onSys(String(m.text || ""));
   } else if (m.type === "train" && S.map) {
     onTrain(String(m.text || ""));
+  } else if (m.type === "gather") {
+    onGather(String(m.text || ""));
+    refreshLivePanel();
   }
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
