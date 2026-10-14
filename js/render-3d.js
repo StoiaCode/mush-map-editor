@@ -156,7 +156,11 @@ export function render3d() {
     }
     S.proj3dCache.push({ id: r.id, sx: p.sx, sy: p.sy, r: half + 4 });
   }
+  if (overlay3d) overlay3d(ctx3d);
 }
+// Something drawn over the 3D view after every render (history.js playback).
+let overlay3d = null;
+export function setOverlay3d(fn) { overlay3d = fn; }
 // truncate text with an ellipsis to fit maxW (font must already be set on ctx3d)
 function fitLabel3d(text, maxW) {
   if (ctx3d.measureText(text).width <= maxW) return text;

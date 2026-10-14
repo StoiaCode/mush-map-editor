@@ -584,3 +584,33 @@ select { cursor: pointer; }
 /* ---------- Gathering (gather.js) ---------- */
 .gathercount { display: flex; gap: 8px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vbadge.trait.tapped { opacity: .45; filter: grayscale(1); }
+
+/* ---------- History playback (history.js) ---------- */
+#historyBar {
+  position: absolute; left: 10px; right: 300px; bottom: 10px; z-index: 25;
+  background: rgba(17,20,26,.95); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.6); padding: 8px 10px; font-size: 12px;
+}
+#app.inspector-collapsed #historyBar { right: 10px; }
+#app.history-open #zoomctl { bottom: 98px; }
+#app.history-open #pathResult { bottom: 108px; }
+.hb-row { display: flex; align-items: center; gap: 6px; }
+.hb-row input[type=range] { flex: 1; min-width: 80px; accent-color: #3ddc84; }
+.hb-row select { padding: 3px 4px; font-size: 11px; }
+.hb-row #hbHeat { padding: 3px 7px; }
+.hb-time { min-width: 150px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.hb-chars { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
+.hb-char { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 3px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel2); }
+.hb-char.off { opacity: .45; }
+.hb-char input[type=color] { width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer; }
+.hb-char input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+.hb-char input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
+.hb-char button { padding: 0 5px; font-size: 11px; border: none; background: none; color: var(--muted); }
+.hb-char button.active, .hb-char button:hover { color: var(--text); }
+.hb-name { font-weight: 600; }
+.hb-count { margin-left: auto; color: var(--muted); font-size: 11px; }
+.histsvg { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+#histlayer .histname { font-size: 13px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: #0f1115; stroke-width: 4px; }
+.histbtns { display: flex; gap: 6px; margin: 4px 0 2px; }
+@media (max-width: 760px) { #historyBar { right: 10px; } .hb-time { min-width: 0; } }

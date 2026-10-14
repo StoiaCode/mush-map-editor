@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.5.0
+// @version      1.6.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -36,7 +36,7 @@
 //                                                the game), or its result: "[You haul away 2 units of
 //                                                paper stock.]", "There is nothing worth scavenging here."
 //   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
-//   mm_ping / mm_pong {id}                   is a PbN tab there?
+//   mm_ping / mm_pong {id, char}             is a PbN tab there, and which character is it?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
 //                                            tab (an alt, say) neither doubles commands nor reports moves
 //   mm_mapper  tab id                        likewise only the most recently used mapper tab answers
@@ -44,7 +44,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.5.0';
+  const VERSION = '1.6.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -91,7 +91,7 @@
       }
     });
 
-    GM_addValueChangeListener('mm_pong', () => toPage('client'));
+    GM_addValueChangeListener('mm_pong', (key, oldV, v) => toPage('client', { char: (v && v.char) || null }));
     const ping = () => GM_setValue('mm_ping', { id: nextSeq() });
     setInterval(ping, 5000);
     ping();
@@ -293,10 +293,16 @@
       });
     }
 
+    // The journal sidebar is always in the page: <span class="journal-title">Vergil's Journal</span>
+    function characterName() {
+      const el = document.querySelector('.journal-title');
+      const m = el && /^(.+?)['’]s?\s+Journal$/.exec(el.textContent.trim());
+      return m ? m[1].trim() : null;
+    }
     let mapperSeen = 0;   // mapper tabs ping every 5s
     GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
       mapperSeen = Date.now();
-      if (isActive()) GM_setValue('mm_pong', { id: v && v.id });
+      if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName() });
     });
     GM_addValueChangeListener('mm_reply', (key, oldV, v) => {
       if (isActive() && v && Array.isArray(v.lines)) localLine(v.lines);

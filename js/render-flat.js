@@ -170,7 +170,11 @@ export function renderFlat() {
   // --- current layer rooms (solid, on top) ---
   for (const r of roomsOnLayer(z)) world.appendChild(makeRoomEl(r, false));
   drawReleaseGhost();
+  if (flatOverlay) flatOverlay();
 }
+// Something drawn over the flat map after every render (history.js playback).
+let flatOverlay = null;
+export function setFlatOverlay(fn) { flatOverlay = fn; }
 
 // A short dashed stub ending in "?" for each compass exit in r.openExits without a real exit.
 // Up/down ones are a "?" badge on the tile instead (makeRoomEl).

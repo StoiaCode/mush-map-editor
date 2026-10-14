@@ -13,12 +13,13 @@ import { computePath, findPath } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
 import { onGather, gatherHtml } from "./gather.js";
+import { setCharacter, currentCharacter, recordMove, historyHtml, wireHistory, onHistoryChange } from "./history.js";
 
 // ---------- Live link to the MUSH web client ----------
 // The MUSH client is another site, so this page can't touch it. The bridge userscript
 // (userscript/mush-mapper-bridge.user.js) runs on both pages and relays through its own storage:
 //   bridge → page  {mm:"bridge", type:"hello"}               userscript is installed
-//                  {mm:"bridge", type:"client"}              the MUSH tab answered a ping
+//                  {mm:"bridge", type:"client", char}        the MUSH tab answered a ping (char: who's playing)
 //                  {mm:"bridge", type:"move", dir, name}     MUSH printed "You move <dir> to <name>."
 //                  {mm:"bridge", type:"goto", q}             "//goto <q>" typed in the PbN client
 //                  {mm:"bridge", type:"sys", text}           the game refused a move ("You can't go that way.")
@@ -109,6 +110,7 @@ export function resolveMove(from, dir, name) {
 }
 export function setHere(id, seenName) {
   S.here = id && S.map.rooms[id] ? id : null;
+  if (S.here && L.bridge && clientAlive()) recordMove(S.here);   // history.js
   const r = hereRoom();
   L.seenName = r && seenName && norm(seenName) !== norm(r.name) ? seenName : null;
   saveLive();
@@ -581,7 +583,7 @@ function buildLivePanel() {
       <a class="livebtn primary" href="${BRIDGE_URL}" target="_blank" rel="noopener">Update</a></div>`;
   }
   h += `<div class="livecard">` + (r
-    ? `<div class="livelabel">You are in</div>
+    ? `<div class="livelabel">${currentCharacter() ? escapeHtml(currentCharacter()) + " is in" : "You are in"}</div>
        <div class="livehere">
          <button class="liveroom" id="liveGoto" title="Show on the map">${escapeHtml(r.name)}</button>
          <button class="liveicon" id="liveForget" title="Forget my position">✕</button>
@@ -611,6 +613,7 @@ function buildLivePanel() {
         <button class="livebtn" id="liveGhostReset">Reset</button></div>` : "");
   }
   h += `<div class="livelabel livesettings">Gathering</div>` + gatherHtml();
+  h += historyHtml();
   h += `<div class="livelabel livesettings">Settings</div>
     <div class="livesetting">
       <div><div>Follow my position</div><div class="livesub">Keep the map centred on you</div></div>
@@ -634,6 +637,7 @@ function buildLivePanel() {
   on("liveForget", "onclick", () => setHere(null));
   on("liveGhostClear", "onclick", () => { clearGhosts(); buildLivePanel(); });
   wireIssues(body, buildLivePanel);
+  wireHistory();
   on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
@@ -724,6 +728,7 @@ window.addEventListener("message", e => {
     if (first) render();   // the inspector and path box grow live buttons
   } else if (m.type === "client") {
     L.clientAt = Date.now();
+    if (m.char) setCharacter(String(m.char));
     updateChip(); refreshLivePanel();
   } else if (m.type === "move" && S.map) {
     onMove(String(m.dir || ""), String(m.name || ""));
@@ -742,6 +747,7 @@ window.addEventListener("message", e => {
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
 onIssuesChange(() => { updateChip(); refreshLivePanel(); });
+onHistoryChange(() => refreshLivePanel());
 window.addEventListener("hashchange", () => { updateChip(); if (automapOn()) toast("🤖 Auto-map on"); });
 loadLive();
 post("probe");
