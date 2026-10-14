@@ -8,6 +8,7 @@ import { centerOnRoom, roomWorldCenter } from "./render-flat.js";
 import { setSpace, toast, roomLocation } from "./spaces.js";
 import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
+import { stationLinesFor } from "./model.js";
 import { computePath, findPath } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
@@ -20,6 +21,7 @@ import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesCha
 //                  {mm:"bridge", type:"move", dir, name}     MUSH printed "You move <dir> to <name>."
 //                  {mm:"bridge", type:"goto", q}             "//goto <q>" typed in the PbN client
 //                  {mm:"bridge", type:"sys", text}           the game refused a move ("You can't go that way.")
+//                  {mm:"bridge", type:"train", text}         a /train line (see Trains below)
 //                  {mm:"bridge", type:"room", room}          the side panel caught up: {name, description,
 //                                                            image, exits:{N:{name,locked,aerial}}, grid:{N:name}}
 //   page → bridge  {mm:"page", type:"probe"}                 ask for a hello
@@ -52,6 +54,7 @@ const L = {
   bridgeV: null,      // version the installed bridge reported
   latestV: null,      // @version of the bridge file this site serves
   gotoList: [],       // room ids of the last numbered //goto list, for "//goto 2"
+  riding: null,       // name of the train line you're aboard, from "You step aboard the ..."
 };
 let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
 
@@ -232,9 +235,12 @@ function autoFill(r, snap) {
 function onMove(word, name) {
   const dir = DIR_OF[(word || "").toLowerCase()] || null;
   if (dir && hereRoom()) noteArrived(hereRoom(), dir, name);
+  L.riding = null;
   if (W) {
     const exp = W.steps[W.done];
-    if (dir !== exp.dir) {
+    if (exp.train) {
+      stopWalk("You moved while the walk was waiting for the train.");
+    } else if (dir !== exp.dir) {
       stopWalk(`Expected <b>${DIRWORD[exp.dir]}</b> but you moved <b>${escapeHtml(word)}</b>.`);
     } else {
       W.done++; W.lastMove = Date.now();
@@ -255,23 +261,22 @@ function onMove(word, name) {
 }
 
 // ---------- Walking a route ----------
-// res is a findPath() result. Walks the leading walk steps; a train leg ends the walk with a note.
+// res is a findPath() result. Walk steps go out in chains; a train leg is one step of its own,
+// ridden with /train wait + /train stop (see Trains below).
 export function startWalk(res, fromGame = false) {
   if (W) stopWalk(null);
-  const steps = [];
-  let note = null;
-  for (let i = 0; i < res.steps.length; i++) {
-    const s = res.steps[i];
-    if (s.type === "train") { note = `Board the <b>${escapeHtml(s.lineName)}</b> to ${escapeHtml(S.map.rooms[s.toId].name)}.`; break; }
-    steps.push({ dir: s.dir, toId: res.rooms[i + 1] });
-  }
-  if (!steps.length) { toast(note || "Nothing to walk."); return; }
+  const steps = res.steps.map((s, i) => s.type === "train"
+    ? { train: true, lineName: s.lineName, toId: s.toId }
+    : { dir: s.dir, toId: res.rooms[i + 1] });
+  const note = null;
+  if (!steps.length) { toast("Nothing to walk."); return; }
   if (!clientAlive()) { toast("📡 No MUSH tab answering. Open (or click into) the MUSH client tab first."); return; }
   setHere(res.rooms[0]);   // you start the walk at the route's start
-  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null, fromGame, retries: 0 };
+  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null, fromGame, retries: 0, phase: null };
   W.timer = setInterval(() => {
-    if (W && W.sent > W.done && Date.now() - W.lastMove > L.stallSec * 1000)
-      stopWalk(`No movement for ${L.stallSec}s (locked door, blocked, or you stopped?).`);
+    // waiting for and riding a train take real time: no stall timeout then
+    if (W && W.sent > W.done && W.phase !== "waiting" && W.phase !== "riding" && Date.now() - W.lastMove > L.stallSec * 1000)
+      stopWalk(W.phase ? `The train didn't answer for ${L.stallSec}s.` : `No movement for ${L.stallSec}s (locked door, blocked, or you stopped?).`);
   }, 1000);
   pump();
   updateChip(); refreshLivePanel();
@@ -284,7 +289,15 @@ function pump(delay = W.sent ? CHAIN_GAP_MS : 0) {
   W.pending = setTimeout(() => {
     if (!W) return;
     W.pending = null;
-    const n = Math.min(L.window, W.steps.length - W.sent);
+    if (W.steps[W.sent].train) {
+      // boards at once if the doors are open, otherwise when the train comes in
+      post("send", { cmds: ["/train wait"] });
+      W.sent++; W.phase = "requested"; W.lastMove = Date.now();
+      updateChip(); refreshLivePanel();
+      return;
+    }
+    let n = 0;   // a chain stops short of a train leg
+    while (n < L.window && W.sent + n < W.steps.length && !W.steps[W.sent + n].train) n++;
     post("send", { cmds: [W.steps.slice(W.sent, W.sent + n).map(s => DIRWORD[s.dir]).join(" ")] });
     W.sent += n;
     W.lastMove = Date.now();   // the stall clock starts when the chain goes out
@@ -314,7 +327,9 @@ function finishWalk() {
 // why = null: replaced by a new walk, say nothing.
 export function stopWalk(why) {
   if (!W) return;
-  const queued = Math.max(0, W.sent - W.done), left = W.steps.length - W.done, fromGame = W.fromGame;
+  // mid train leg: stop waiting, or drop the chosen stop (cancel aboard keeps you on the train)
+  if (W.phase && W.sent > W.done) post("send", { cmds: ["/train cancel"] });
+  const queued = W.phase ? 0 : Math.max(0, W.sent - W.done), left = W.steps.length - W.done, fromGame = W.fromGame;
   clearInterval(W.timer); clearTimeout(W.pending); W = null;
   if (why !== null) {
     const msg = `Walk stopped. ${why || ""} ${left} step${left !== 1 ? "s" : ""} left` +
@@ -332,12 +347,85 @@ function walkEnded() {
     computePath(S.pathLast.startId, S.pathLast.endId);
 }
 
+// ---------- Trains ----------
+// Confirmed PbN lines. Riding a leg: at the boarding station send "/train wait"; once aboard send
+// "/train stop <destination>" (full name, commas and all) and check the game confirms that very
+// station; the game then steps you off there by itself. A ride has no "You move", so "Now arriving"
+// and "You step off onto" carry the position, for manual rides too.
+const TRAIN = {
+  waiting:  /^You wait for the next train/,
+  aboard:   /^You step aboard the (.+?)\./,
+  stopSet:  /^You will step off at (.+?)\. Use \/train cancel/,
+  arriving: /Now arriving: (.+?)\. The doors open\./,
+  closing:  /^The chime sounds\. The doors close on (.+?) and the train moves off/,
+  off:      /^You step off onto (.+?)\.$/,
+};
+// the room with that name, preferring stations when several rooms share it
+function stationNamed(name) {
+  const hits = Object.values(S.map.rooms).filter(r => r.name === name);
+  const stations = hits.filter(r => stationLinesFor(r.id).length);
+  return stations.length === 1 ? stations[0] : hits.length === 1 ? hits[0] : null;
+}
+function onTrain(text) {
+  let m;
+  if ((m = TRAIN.aboard.exec(text))) L.riding = m[1];
+  const step = W && W.steps[W.done];
+  if (step && step.train && W.sent > W.done && trainStep(step, text)) return;
+  // position, walking or not
+  if ((m = TRAIN.off.exec(text))) {
+    L.riding = null;
+    const st = stationNamed(m[1]);
+    if (st) setHere(st.id, m[1]);
+  } else if ((m = TRAIN.arriving.exec(text)) && L.riding) {
+    const st = stationNamed(m[1]);
+    if (st) setHere(st.id, m[1]);   // the ring rides along
+  }
+  updateChip(); refreshLivePanel();
+}
+// The current walk step is a train leg. Returns true when it fully handled the line.
+function trainStep(step, text) {
+  const dest = S.map.rooms[step.toId];
+  let m;
+  W.lastMove = Date.now();
+  if (TRAIN.waiting.test(text)) { W.phase = "waiting"; }
+  else if (TRAIN.aboard.test(text)) {
+    W.phase = "aboard";
+    post("send", { cmds: [`/train stop ${dest.name}`] });
+  } else if ((m = TRAIN.stopSet.exec(text))) {
+    if (m[1] !== dest.name) {
+      stopWalk(`The game set your stop to “${escapeHtml(m[1])}” instead of “${escapeHtml(dest.name)}”, so I cancelled it. You're still aboard.`);
+      return true;
+    }
+    W.phase = "riding";
+  } else if ((m = TRAIN.closing.exec(text)) && m[1] === dest.name && W.phase === "riding") {
+    // the doors closed on our stop and we're still aboard: held up (a fight, the Beast)
+    stopWalk(`You missed your stop at ${escapeHtml(dest.name)} and are still on the train.`);
+    return true;
+  } else if ((m = TRAIN.off.exec(text))) {
+    L.riding = null;
+    if (m[1] !== dest.name) {
+      W.phase = null;   // already off the train: nothing to cancel
+      stopWalk(`You got off at ${escapeHtml(m[1])}, not ${escapeHtml(dest.name)}.`);
+      return false;     // the general handler still moves the ring to where you got off
+    }
+    W.done++; W.sent = W.done; W.phase = null;
+    setHere(dest.id, m[1]);
+    if (W.done === W.steps.length) finishWalk(); else pump();
+    updateChip(); refreshLivePanel();
+    return true;
+  }
+  updateChip(); refreshLivePanel();
+  return false;
+}
+
 // ---------- //goto from the PbN client ----------
 // "//goto cafe bar" walks to the room whose name holds every word typed. Several matches come back
 // as a numbered list ("//goto 2" picks one), so even identical names can be told apart.
 // "//goto stop" stops a walk, a bare "//goto" says where the mapper thinks you are.
 function reply(...lines) { post("reply", { lines }); }
-const plain = html => String(html).replace(/<[^>]+>/g, "");
+// toast HTML → chat text: drop tags, undo escapeHtml/escapeAttr ("Broad &amp; Market" → "Broad & Market")
+const plain = html => String(html).replace(/<[^>]+>/g, "")
+  .replace(/&(lt|gt|quot|amp);/g, (_, e) => ({ lt: "<", gt: ">", quot: '"', amp: "&" }[e]));
 const fold = s => (s || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 function matchRooms(q) {
   const all = Object.values(S.map.rooms);
@@ -356,13 +444,13 @@ function gotoRoomFromGame(target) {
   if (here.id === target.id) return reply(`You're already in ${target.name}.`);
   const res = routeTo(here.id, target.id);
   if (!res) return reply(`No ${S.pathCanFly ? "" : "ground "}route from ${here.name} to ${target.name} on your map.`);
-  if (res.steps[0].type === "train") return reply(`The route starts with a train: board the ${res.steps[0].lineName} here.`);
-  const walkSteps = res.steps.findIndex(s => s.type === "train");
+  const trains = res.steps.filter(s => s.type === "train");
+  const walkSteps = res.steps.length - trains.length;
   computePath(here.id, target.id);   // show it in the mapper too
   startWalk(res, true);
   if (!W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
-  reply(`Walking to ${target.name}: ${walkSteps < 0 ? res.steps.length : walkSteps} steps` +
-    (walkSteps < 0 ? "." : `, then a train (it stops there).`) + " //goto stop to stop.");
+  reply(`Walking to ${target.name}: ${walkSteps} step${walkSteps !== 1 ? "s" : ""}` +
+    (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "") + ". //goto stop to stop.");
 }
 function onGoto(q) {
   if (!S.map) return;
@@ -405,7 +493,8 @@ function updateChip() {
   btn.classList.toggle("live-on", alive);
   btn.classList.toggle("live-update", bridgeOutdated());
   const issues = issueCount();
-  btn.textContent = (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab") +
+  const train = W && W.phase === "waiting" ? "🚆 waiting" : L.riding ? `🚆 ${L.riding}` : null;
+  btn.textContent = (train || (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab")) +
     (issues ? ` · ⚠${issues}` : "") + (automapOn() ? " · 🤖" : "");
   btn.title = bridgeOutdated() ? "A newer version of the bridge userscript is available. Click to update." :
     W ? "Walking a route. Click for details or to stop." :
@@ -448,7 +537,9 @@ function buildLivePanel() {
       <div class="livewalkhead"><div><div class="livelabel">Walking to</div><b>${escapeHtml(dest ? dest.name : "?")}</b></div>
         <button class="livebtn danger" id="liveStop">■ Stop</button></div>
       <div class="liveprog"><span style="width:${pct}%"></span></div>
-      <div class="livesub">${W.done} of ${W.steps.length} steps</div></div>`;
+      <div class="livesub">${W.done} of ${W.steps.length} steps` +
+      (W.phase === "requested" ? " · 🚆 calling the train…" : W.phase === "waiting" ? " · 🚆 waiting for the train" :
+       W.phase ? ` · 🚆 riding to ${escapeHtml(S.map.rooms[W.steps[W.done].toId].name)}` : "") + `</div></div>`;
   }
   h += issuesHtml();
   const gn = ghostCount(), gd = dismissedCount();
@@ -581,6 +672,8 @@ window.addEventListener("message", e => {
     onGoto(m.q);
   } else if (m.type === "sys") {
     onSys(String(m.text || ""));
+  } else if (m.type === "train" && S.map) {
+    onTrain(String(m.text || ""));
   }
 });
 setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab

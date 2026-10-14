@@ -174,12 +174,11 @@ export function computePath(startId, endId) {
 function walkHtml(startId, res) {
   if (!liveBridge() || !res.steps.length) return "";
   if (walking()) return `<div class="pathwalk"><button id="pathStop" class="danger">■ Stop walking</button></div>`;
-  if (res.steps[0].type === "train") return "";
   const off = S.here && S.here !== startId && S.map.rooms[S.here];
   return `<div class="pathwalk">` +
     (off ? `<div class="hint">⚠ The live link thinks you're at <b>${escapeHtml(off.name)}</b>, not the start.</div>` : "") +
     `<button id="pathWalk" class="primary" title="Type this route into the MUSH client, a few moves at a time">▶ Walk it</button>` +
-    (res.steps.some(s => s.type === "train") ? ` <span class="hint">walks up to the first train</span>` : "") +
+    (res.steps.some(s => s.type === "train") ? ` <span class="hint">rides the train too</span>` : "") +
     `</div>`;
 }
 // When a route crosses spaces, list the hand-offs ("Main map → ⧉ Highrise Apts") with each

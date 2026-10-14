@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.3.0
+// @version      1.4.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -30,6 +30,8 @@
 //                {seq, kind:'goto', q}           "//goto <q>" typed in PbN (never sent to the game)
 //                {seq, kind:'sys', text}         a refused move: "You can't go that way.",
 //                                                "You are moving too quickly. Slow down." and the like
+//                {seq, kind:'train', text}       a /train line: waiting, aboard, stop set, arriving,
+//                                                doors closing, stepped off
 //   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
 //   mm_ping / mm_pong {id}                   is a PbN tab there?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
@@ -39,7 +41,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -80,6 +82,7 @@
         if (ev.kind === 'room') toPage('room', { room: ev.room });
         else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q }); }
         else if (ev.kind === 'sys') toPage('sys', { text: ev.text });
+        else if (ev.kind === 'train') toPage('train', { text: ev.text });
         else toPage('move', { dir: ev.dir, name: ev.name });
       }
     });
@@ -103,6 +106,9 @@
     // On connect: "[LOCATION] You are in Le Cafe de Rien - Coffee Bar"
     const YOU_ARE_IN_RE = /^You are in (.+?)\.?$/;
     // Confirmed: "You can't go that way." / "You are moving too quickly. Slow down."
+    // Confirmed /train lines, e.g. "You step aboard the Broad Street Line. ...",
+    // "The brakes bite and the train slows. Now arriving: Ellsworth-Federal Station. The doors open."
+    const TRAIN_RE = /^(?:You wait for the next train|You step aboard the |You will step off at |You step off onto |The brakes bite.*Now arriving: |The chime sounds\. The doors close on )/;
     const REFUSED_RE = /^You (?:can't|cannot|can not|are moving too quickly)\b/i;
 
     const tabId = Math.random().toString(36).slice(2);
@@ -149,6 +155,11 @@
         return;
       }
       if (text && REFUSED_RE.test(text)) { push({ kind: 'sys', text }); return; }
+      if (text && TRAIN_RE.test(text)) {
+        push({ kind: 'train', text });
+        const off = /^You step off onto (.+?)\.$/.exec(text);
+        if (off) reportRoom(off[1]);   // a train ride ends without a "You move" line
+      }
       const loc = getLocationText(article);
       const here = loc && YOU_ARE_IN_RE.exec(loc);
       if (here) reportRoom(here[1].trim());
