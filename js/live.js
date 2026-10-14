@@ -54,6 +54,7 @@ const L = {
   bridgeV: null,      // version the installed bridge reported
   latestV: null,      // @version of the bridge file this site serves
   gotoList: [],       // room ids of the last numbered //goto list, for "//goto 2"
+  gotoFly: false,     // ...and whether that list was a "//goto fly" one
   riding: null,       // name of the train line you're aboard, from "You step aboard the ..."
 };
 let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
@@ -422,6 +423,8 @@ function trainStep(step, text) {
 // "//goto cafe bar" walks to the room whose name holds every word typed. Several matches come back
 // as a numbered list ("//goto 2" picks one), so even identical names can be told apart.
 // "//goto stop" stops a walk, a bare "//goto" says where the mapper thinks you are.
+// Ground-only unless you say "//goto fly <room>": lifting off in public breaches the Masquerade,
+// so flight is never picked up silently from the route box's checkbox (/stalk first is on you).
 function reply(...lines) { post("reply", { lines }); }
 // toast HTML → chat text: drop tags, undo escapeHtml/escapeAttr ("Broad &amp; Market" → "Broad & Market")
 const plain = html => String(html).replace(/<[^>]+>/g, "")
@@ -435,21 +438,28 @@ function matchRooms(q) {
   return all.filter(r => { const n = fold(r.name); return words.every(w => n.includes(w)); });
 }
 // walk-only first, trains only when there's no other way (same rule as the route box)
-function routeTo(fromId, toId) {
-  return findPath(fromId, toId, S.pathCanFly, false) || findPath(fromId, toId, S.pathCanFly, true);
+function routeTo(fromId, toId, fly) {
+  return findPath(fromId, toId, fly, false) || findPath(fromId, toId, fly, true);
 }
-function gotoRoomFromGame(target) {
+function gotoRoomFromGame(target, fly) {
   const here = hereRoom();
   if (!here) return reply("I don't know where you are yet. Move once, or press 📍 I'm here in the mapper.");
   if (here.id === target.id) return reply(`You're already in ${target.name}.`);
-  const res = routeTo(here.id, target.id);
-  if (!res) return reply(`No ${S.pathCanFly ? "" : "ground "}route from ${here.name} to ${target.name} on your map.`);
+  const res = routeTo(here.id, target.id, fly);
+  if (!res) {
+    const byAir = !fly && routeTo(here.id, target.id, true);
+    return reply(`No ${fly ? "" : "ground "}route from ${here.name} to ${target.name} on your map.` +
+      (byAir ? ` There is one with flight: //goto fly ${target.name}` : ""));
+  }
   const trains = res.steps.filter(s => s.type === "train");
   const walkSteps = res.steps.length - trains.length;
+  const flown = res.steps.filter(s => s.fly).length;
+  S.pathCanFly = !!fly;              // the route box shows what's actually walked
   computePath(here.id, target.id);   // show it in the mapper too
   startWalk(res, true);
   if (!W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
   reply(`Walking to ${target.name}: ${walkSteps} step${walkSteps !== 1 ? "s" : ""}` +
+    (flown ? ` (${flown} flown)` : "") +
     (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "") + ". //goto stop to stop.");
 }
 function onGoto(q) {
@@ -465,23 +475,32 @@ function onGoto(q) {
   }
   if (/^\d+$/.test(q) && L.gotoList.length) {
     const r = S.map.rooms[L.gotoList[parseInt(q, 10) - 1]];
-    return r ? gotoRoomFromGame(r) : reply(`Pick a number from 1 to ${L.gotoList.length}.`);
+    return r ? gotoRoomFromGame(r, L.gotoFly) : reply(`Pick a number from 1 to ${L.gotoList.length}.`);
+  }
+  // "//goto fly <room>": the first word switches flight on (a room starting with "fly": "//goto fly fly trap")
+  let fly = false;
+  const fm = /^fly(?:\s+([\s\S]*))?$/i.exec(q);
+  if (fm) {
+    fly = true;
+    q = (fm[1] || "").trim();
+    if (!q) return reply("Where to? //goto fly <room>");
   }
   const hits = matchRooms(q);
   if (!hits.length) return reply(`Nothing on your map matches "${q}".`);
-  if (hits.length === 1) return gotoRoomFromGame(hits[0]);
+  if (hits.length === 1) return gotoRoomFromGame(hits[0], fly);
   // several: nearest first, with where they are and how far, so duplicates can be told apart
   const here = hereRoom();
   const rows = hits.map(r => {
-    const res = here ? routeTo(here.id, r.id) : null;
+    const res = here ? routeTo(here.id, r.id, fly) : null;
     return { r, steps: res ? res.steps.length : (here && here.id === r.id ? 0 : Infinity) };
   }).sort((a, b) => a.steps - b.steps || a.r.name.localeCompare(b.r.name));
   const shown = rows.slice(0, 8);
   L.gotoList = shown.map(x => x.r.id);
+  L.gotoFly = fly;
   reply(`${hits.length} rooms match "${q}":`,
     ...shown.map((x, i) => `${i + 1}. ${x.r.name} · ${roomLocation(x.r)}` +
       (x.steps === Infinity ? (here ? " · no route" : "") : x.steps === 0 ? " · you are here" : ` · ${x.steps} step${x.steps !== 1 ? "s" : ""}`)),
-    (hits.length > shown.length ? `…and ${hits.length - shown.length} more. ` : "") + "Type //goto <number> to pick one, or be more specific.");
+    (hits.length > shown.length ? `…and ${hits.length - shown.length} more. ` : "") + `Type //goto <number> to pick one${fly ? " (flying)" : ""}, or be more specific.`);
 }
 
 // ---------- Toolbar chip + panel ----------
