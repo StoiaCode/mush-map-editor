@@ -1,4 +1,4 @@
-import { DIRWORD, VEC, COMPASS, GRID_N } from "./constants.js";
+import { DIRWORD, VEC, COMPASS, GRID_N, OPP } from "./constants.js";
 import { S, viewport } from "./state.js";
 import { escapeHtml, clamp } from "./utils.js";
 import { spaceOf, curSpace, roomAtCell, createRoom, deleteRoom } from "./model.js";
@@ -93,14 +93,25 @@ function neighbourCell(r, dir) {
   const [dx, dy] = VEC[dir];
   return roomAtCell(r.z, r.x + dx, r.y + dy, spaceOf(r));
 }
+// A room with exactly this name that already has an exit INTO `from`: when the way out isn't
+// mapped, the way in usually is. Prefers the opposite direction (walking west out of B, the room
+// whose east exit leads into B). This is what finds the way back out of a space, whose grid has
+// nothing to do with the street outside, so looking at the next cell would be wrong.
+function linkedInto(from, dir, name) {
+  const into = Object.values(S.map.rooms).filter(r => r.name === name && Object.values(r.exits).includes(from.id));
+  return into.find(r => r.exits[OPP[dir]] === from.id) || (into.length === 1 ? into[0] : null);
+}
 // Where did "You move <dir> to <name>" put us? Most to least trusted:
-//   the mapped exit, when its name agrees → a room in that cell with that name (exit not linked
-//   yet) → the only room anywhere with that name (we were tracking the wrong room) → the mapped
-//   exit anyway (its name is probably just out of date) → lost.
+//   the mapped exit, when its name agrees → a room with that name that leads back into this one
+//   (exit not linked this way yet) → a room in that cell with that name → the only room anywhere
+//   with that name (we were tracking the wrong room) → the mapped exit anyway (its name is
+//   probably just out of date) → lost.
 export function resolveMove(from, dir, name) {
   const want = norm(name);
   const viaExit = from && dir ? S.map.rooms[from.exits[dir]] || null : null;
   if (viaExit && norm(viaExit.name) === want) return viaExit;
+  const back = from && dir ? linkedInto(from, dir, name) : null;
+  if (back) return back;
   const cell = from && dir ? neighbourCell(from, dir) : null;
   if (cell && norm(cell.name) === want) return cell;
   const byName = Object.values(S.map.rooms).filter(r => norm(r.name) === want);
@@ -189,6 +200,13 @@ let autoWarned = false;   // autoStep explained why it stopped: don't bury that 
 function autoStep(from, dir, name) {
   const took = L.snap && L.snap.name === from.name && L.snap.exits ? L.snap.exits[dir] : null;
   const fly = !!(took && took.aerial);
+  // already mapped the other way round (e.g. back out of a space): link it, build nothing
+  const back = linkedInto(from, dir, name);
+  if (back) {
+    linkOneWay(from, dir, back, fly);
+    commit();
+    return back;
+  }
   const cell = neighbourCell(from, dir);
   if (cell) {
     if (cell.name !== name) {
@@ -220,8 +238,10 @@ function autoFill(r, snap) {
   for (const [d, ex] of Object.entries(snap.exits || {})) {
     if (!ex || r.exits[d]) continue;
     // flight exits never name where they go, so they can't be matched to a mapped room
-    const n = ex.name ? neighbourCell(r, d) : null;
-    if (n && n.name === ex.name) {
+    let n = ex.name ? neighbourCell(r, d) : null;
+    if (n && n.name !== ex.name) n = null;
+    if (!n && ex.name) n = linkedInto(r, d, ex.name);   // e.g. the street outside a space's door
+    if (n) {
       r.exits[d] = n.id;
       if (r.openExits) delete r.openExits[d];
       changed = true;
