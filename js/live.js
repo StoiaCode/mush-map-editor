@@ -189,11 +189,18 @@ function inGrid(r, dir) {
   const [dx, dy] = VEC[dir];
   return r.x + dx >= 0 && r.x + dx < GRID_N && r.y + dy >= 0 && r.y + dy < GRID_N;
 }
-// One-way on purpose: whether the way back exists is only known once the next room's exits arrive.
-function linkOneWay(a, dir, b, fly) {
+// PbN's exits go both ways (even when one end is hidden; one known exception, which gets its
+// back exit deleted by hand), so auto-map always links both directions at once. The way back is
+// only added where that direction is still free: an exit that leads elsewhere is never replaced.
+function linkBoth(a, dir, b, fly) {
   a.exits[dir] = b.id;
   if (fly) a.exitFly[dir] = true;
   if (a.openExits) delete a.openExits[dir];
+  const back = OPP[dir];
+  if (b.exits[back]) return;
+  b.exits[back] = a.id;
+  if (fly) b.exitFly[back] = true;
+  if (b.openExits) delete b.openExits[back];
 }
 // Called on a move along an exit the map doesn't have yet. Returns the room we're now in, or null.
 let autoWarned = false;   // autoStep explained why it stopped: don't bury that under "Lost"
@@ -203,7 +210,7 @@ function autoStep(from, dir, name) {
   // already mapped the other way round (e.g. back out of a space): link it, build nothing
   const back = linkedInto(from, dir, name);
   if (back) {
-    linkOneWay(from, dir, back, fly);
+    linkBoth(from, dir, back, fly);
     commit();
     return back;
   }
@@ -215,7 +222,7 @@ function autoStep(from, dir, name) {
       autoWarned = true;
       return null;
     }
-    linkOneWay(from, dir, cell, fly);
+    linkBoth(from, dir, cell, fly);
     commit();
     return cell;
   }
@@ -224,7 +231,7 @@ function autoStep(from, dir, name) {
   const dz = dir === "UP" ? 1 : dir === "DOWN" ? -1 : 0;
   const r = createRoom(from.z + dz, from.x + dx, from.y + dy, name, spaceOf(from));
   r.auto = true; r.autoAt = Date.now();
-  linkOneWay(from, dir, r, fly);
+  linkBoth(from, dir, r, fly);
   commit();
   return r;
 }
@@ -233,6 +240,16 @@ function autoStep(from, dir, name) {
 function autoFill(r, snap) {
   if (!r || r.name !== snap.name) return;
   let changed = false;
+  // repair links made one way by older versions: whatever leads in here gets the way back
+  for (const other of Object.values(S.map.rooms)) {
+    for (const [d, id] of Object.entries(other.exits)) {
+      if (id !== r.id || r.exits[OPP[d]]) continue;
+      r.exits[OPP[d]] = other.id;
+      if (other.exitFly && other.exitFly[d]) r.exitFly[OPP[d]] = true;
+      if (r.openExits) delete r.openExits[OPP[d]];
+      changed = true;
+    }
+  }
   if (!r.description && snap.description) { r.description = snap.description; changed = true; }
   if (!r.imageUrl && snap.image) { r.imageUrl = snap.image; changed = true; }
   for (const [d, ex] of Object.entries(snap.exits || {})) {
@@ -242,8 +259,7 @@ function autoFill(r, snap) {
     if (n && n.name !== ex.name) n = null;
     if (!n && ex.name) n = linkedInto(r, d, ex.name);   // e.g. the street outside a space's door
     if (n) {
-      r.exits[d] = n.id;
-      if (r.openExits) delete r.openExits[d];
+      linkBoth(r, d, n, false);
       changed = true;
       continue;
     }
