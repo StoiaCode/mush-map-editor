@@ -9,8 +9,32 @@
 // the fetch throws and we fall back to the raw URL, which still displays fine via CSS
 // background-image (that never needed CORS) — we just don't get our own persistent cache
 // for that particular image. Staggering still applies either way.
+//   3. Stores a shrunk copy, not the original: tiles show at most 82px × 2.5 zoom (≈410 device
+//      px on a high-DPI screen), cropped square, so the short side is capped at SHRINK_PX and
+//      re-encoded as WebP. The inspector preview loads the original URL itself, at full size.
 const CACHE_NAME = "mush-map-images-v1";
 const MAX_CONCURRENT = 4;
+const SHRINK_PX = 440, SHRINK_Q = 0.8;
+const SHRUNK = "x-mm-shrunk";   // header on cache entries that are already the small copy
+
+// A smaller WebP copy of `blob` as a cacheable Response, or null when it wouldn't save anything.
+async function shrink(blob) {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const k = Math.min(1, SHRINK_PX / Math.min(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    c.getContext("2d").drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    const out = await new Promise(done => c.toBlob(done, "image/webp", SHRINK_Q));
+    if (!out || out.type !== "image/webp") return null;   // browser can't encode WebP
+    return new Response(out.size < blob.size ? out : blob,
+      { headers: { "content-type": out.size < blob.size ? out.type : blob.type, "content-length": String(Math.min(out.size, blob.size)), [SHRUNK]: "1" } });
+  } catch (e) {
+    return null;   // not decodable as an image: keep whatever we have
+  }
+}
 
 const resolved = new Map();   // remote url -> usable src (cached blob: URL, or the raw url as fallback)
 const queue = [];
@@ -32,7 +56,12 @@ async function load(url) {
       let res = await cache.match(url);
       if (!res) {
         res = await fetch(url, { mode: "cors" });
+        if (res.ok) res = (await shrink(await res.clone().blob())) || res;
         if (res.ok) await cache.put(url, res.clone());
+      } else if (!res.headers.get(SHRUNK)) {
+        // cached before shrinking existed: swap in the small copy
+        const small = await shrink(await res.clone().blob());
+        if (small) { await cache.put(url, small.clone()); res = small; }
       }
       if (res.ok) src = URL.createObjectURL(await res.blob());
     }
@@ -70,6 +99,20 @@ export async function clearImageCache() {
   resolved.clear();
   if ("caches" in window) await caches.delete(CACHE_NAME);
 }
+
+// Shrinks everything cached before shrinking existed, one image at a time, so images on layers
+// you don't open also get smaller. Runs once per page load, a little after startup.
+async function shrinkOldEntries() {
+  if (!("caches" in window) || !(await caches.has(CACHE_NAME))) return;
+  const cache = await caches.open(CACHE_NAME);
+  for (const key of await cache.keys()) {
+    const res = await cache.match(key);
+    if (!res || res.headers.get(SHRUNK)) continue;
+    const small = await shrink(await res.blob());
+    if (small) await cache.put(key, small);
+  }
+}
+setTimeout(() => { shrinkOldEntries().catch(() => {}); }, 5000);
 
 // Reports how many images are actually persisted in Cache Storage and their total size —
 // a direct, honest check that caching is working (as opposed to just trusting the code).
