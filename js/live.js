@@ -659,6 +659,7 @@ function buildLivePanel() {
       <div class="livesetting"><div><div>${autos.length} not verified yet</div><div class="livesub">Made by auto-map, not marked ✓ Verified</div></div></div>
       <div class="histbtns">` +
       (recent ? `<button class="livebtn" id="autoDelRecent" title="Delete the unverified rooms auto-map made in the last hour">Delete last hour (${recent})</button>` : "") +
+      `<button class="livebtn" id="autoVerifyAll" title="Mark every auto-created room ✓ Verified">Verify all (${autos.length})</button>` +
       `<button class="livebtn danger" id="autoDelAll" title="Delete every unverified auto-created room">Delete all (${autos.length})</button></div>`;
   }
   h += `<div class="livelabel livesettings">Gathering</div>` + gatherHtml();
@@ -688,6 +689,13 @@ function buildLivePanel() {
   wireIssues(body, buildLivePanel);
   on("autoDelRecent", "onclick", () => deleteAutoRooms(true));
   on("autoDelAll", "onclick", () => deleteAutoRooms(false));
+  on("autoVerifyAll", "onclick", () => {
+    const list = Object.values(S.map.rooms).filter(x => x.auto);
+    if (!list.length || !confirm(`Mark all ${list.length} auto-created room${list.length !== 1 ? "s" : ""} ✓ Verified? Ctrl+Z undoes it.`)) return;
+    for (const x of list) { delete x.auto; delete x.autoAt; }
+    commit(); render(); buildLivePanel();
+    toast(`✓ Verified ${list.length} room${list.length !== 1 ? "s" : ""}.`);
+  });
   wireHistory();
   on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });

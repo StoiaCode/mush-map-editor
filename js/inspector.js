@@ -97,6 +97,7 @@ export function renderInspector() {
       `<div class="insec">
         <button id="bulk_capture" style="width:100%;margin-bottom:6px;" title="Preview moving exactly these rooms into a separate pocket space">⧉ Move ${S.selection.size} rooms into a space…</button>
         ${S.map.currentSpace ? `<button id="bulk_release" style="width:100%;margin-bottom:6px;" title="Place these rooms back onto the main map (you pick the spot first)">↩ Move ${S.selection.size} rooms to the main map…</button>` : ""}
+        ${[...S.selection].some(id => S.map.rooms[id] && S.map.rooms[id].auto) ? `<button id="bulk_verify" style="width:100%;margin-bottom:6px;" title="Drop the auto-created marking from the selected rooms">✓ Verify ${[...S.selection].filter(id => S.map.rooms[id] && S.map.rooms[id].auto).length} auto-created</button>` : ""}
         <button id="bulk_clear" style="width:100%;margin-bottom:6px;">Clear selection</button>
         <button class="danger" id="bulk_del" style="width:100%">Delete ${S.selection.size} rooms</button>
       </div>` +
@@ -118,6 +119,11 @@ export function renderInspector() {
     document.getElementById("bulk_capture").onclick = () => startSelectionCapture([...S.selection]);
     const relBtn = document.getElementById("bulk_release");
     if (relBtn) relBtn.onclick = () => startRelease([...S.selection]);
+    const verBulk = document.getElementById("bulk_verify");
+    if (verBulk) verBulk.onclick = () => {
+      for (const id of S.selection) if (S.map.rooms[id]) { delete S.map.rooms[id].auto; delete S.map.rooms[id].autoAt; }
+      commit(); render();
+    };
     document.getElementById("bulk_del").onclick = () => {
       if (confirmDeleteRooms([...S.selection])) { for (const id of [...S.selection]) deleteRoom(id); clearSelection(); commit(); render(); }
     };
@@ -275,7 +281,7 @@ export function renderInspector() {
   };
   document.getElementById("f_img").onchange = () => commit();
   const verBtn = document.getElementById("f_verified");
-  if (verBtn) verBtn.onclick = () => { delete r.auto; commit(); render(); };
+  if (verBtn) verBtn.onclick = () => { delete r.auto; delete r.autoAt; commit(); render(); };
   const hereBtn = document.getElementById("f_here");
   if (hereBtn) hereBtn.onclick = () => setHere(r.id);
   const routeBtn = document.getElementById("f_route");

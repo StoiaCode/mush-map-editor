@@ -1,4 +1,4 @@
-import { CELL, SIZE_PX } from "./constants.js";
+import { CELL, SIZE_PX, DIRS, VEC, OPP } from "./constants.js";
 import { S, world } from "./state.js";
 import { escapeHtml, clamp } from "./utils.js";
 import { roomAtCell, curSpace, selectSingle, createRoom } from "./model.js";
@@ -59,12 +59,23 @@ export function clearGhosts() { G.ghosts = {}; save(); render(); }
 export function resetDismissed() { G.dismissed = {}; save(); }
 
 function dismiss(k) { delete G.ghosts[k]; G.dismissed[k] = true; save(); render(); }
-// A real room with just the name, marked auto-created (unverified) like auto-map's own rooms.
+// A real room with just the name. Choosing "make real" is the check, so it isn't marked
+// auto-created. Unexplored exits of the rooms right next to it that point into its cell become
+// real exits both ways: an exit to a neighbouring cell that now holds a room leads there.
 function makeReal(k) {
   const g = G.ghosts[k];
   if (!g || roomAtCell(g.z, g.x, g.y, g.space)) return;
   const r = createRoom(g.z, g.x, g.y, g.name, g.space);
-  r.auto = true; r.autoAt = Date.now();
+  for (const d of DIRS) {
+    const n = d === "UP" || d === "DOWN"
+      ? roomAtCell(g.z + (d === "UP" ? 1 : -1), g.x, g.y, g.space)
+      : roomAtCell(g.z, g.x + VEC[d][0], g.y + VEC[d][1], g.space);
+    const back = OPP[d], stub = n && n.openExits && n.openExits[back];
+    if (!stub || n.exits[back] || r.exits[d]) continue;
+    n.exits[back] = r.id; r.exits[d] = n.id;
+    if (stub.fly) { (n.exitFly ||= {})[back] = true; (r.exitFly ||= {})[d] = true; }
+    delete n.openExits[back];
+  }
   delete G.ghosts[k]; save();
   selectSingle(r.id);
   commit(); render();
