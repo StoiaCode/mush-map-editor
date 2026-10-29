@@ -192,7 +192,9 @@ function inGrid(r, dir) {
 // PbN's exits go both ways (even when one end is hidden; one known exception, which gets its
 // back exit deleted by hand), so auto-map always links both directions at once. The way back is
 // only added where that direction is still free: an exit that leads elsewhere is never replaced.
+// Callers only link directions that are free; the check here makes sure of it regardless.
 function linkBoth(a, dir, b, fly) {
+  if (a.exits[dir]) return;
   a.exits[dir] = b.id;
   if (fly) a.exitFly[dir] = true;
   if (a.openExits) delete a.openExits[dir];

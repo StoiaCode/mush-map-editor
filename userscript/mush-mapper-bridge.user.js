@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.2
+// @version      1.6.3
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -107,6 +107,8 @@
     const ARTICLE_SELECTOR = '[role="article"]';
     // Confirmed: "[SYSTEM] You move northeast to Cuthbert Street Alley."
     const MOVE_RE = /^You move (.+?) to (.+?)\.?$/;
+    // Confirmed: "[SYSTEM] You follow Graves north to The SchreckNET Terminal." (same groups as MOVE_RE)
+    const FOLLOW_RE = /^You follow .+? (north|northeast|east|southeast|south|southwest|west|northwest|up|down) to (.+?)\.?$/;
     // On connect: "[LOCATION] You are in Le Cafe de Rien - Coffee Bar"
     const YOU_ARE_IN_RE = /^You are in (.+?)\.?$/;
     // Confirmed: "You can't go that way." / "You are moving too quickly. Slow down."
@@ -157,7 +159,7 @@
       if (seen.has(article)) return;
       seen.add(article);
       const text = getSystemText(article);
-      const m = text && MOVE_RE.exec(text);
+      const m = text && (MOVE_RE.exec(text) || FOLLOW_RE.exec(text));
       if (m) {
         const name = m[2].trim();
         push({ kind: 'move', dir: m[1].trim(), name });
