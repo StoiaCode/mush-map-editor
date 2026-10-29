@@ -113,7 +113,7 @@ export function computePath(startId, endId) {
   if (!res) {
     S.pathRooms = new Set();
     box.innerHTML = `<div><b>No ${S.pathCanFly ? "" : "ground "}route</b> from “${escapeHtml(roomName(startId))}” to “${escapeHtml(roomName(endId))}”.</div>` +
-      `<div>${flyChk}</div><button id="pathClose">✕ close</button>`;
+      `<div>${flyChk}</div>${reverseBtn(startId, endId)}<button id="pathClose">✕ close</button>`;
   } else {
     S.pathRooms = new Set(res.rooms);
     const flyCount = res.steps.filter(s => s.fly).length;
@@ -152,9 +152,11 @@ export function computePath(startId, endId) {
         (trainCount ? ` · <span class="trainstep" style="font-weight:700">${trainCount} train leg${trainCount !== 1 ? "s" : ""}</span>` : "") + `</div>` +
       dirsHtml + spacesHtml(res.rooms) + walkHtml(startId, res) +
       `<div>${flyChk}</div>` +
-      `<button id="pathClose">✕ clear</button>`;
+      reverseBtn(startId, endId) + `<button id="pathClose">✕ clear</button>`;
   }
   document.getElementById("pathClose").onclick = clearPath;
+  const rb = document.getElementById("pathReverse");
+  if (rb) rb.onclick = () => computePath(reverseFrom(startId, endId), startId);
   const wb = document.getElementById("pathWalk");
   if (wb) wb.onclick = () => { startWalk(res); computePath(startId, endId); };
   const sb = document.getElementById("pathStop");
@@ -169,6 +171,17 @@ export function computePath(startId, endId) {
     }).catch(() => {});
   });
   render();
+}
+// The way back to the start. It starts from where the live link puts you (you may have wandered
+// off after arriving), or from the old destination when the position isn't known, or is still
+// the start because you haven't set off yet.
+function reverseFrom(startId, endId) {
+  return S.here && S.map.rooms[S.here] && S.here !== startId ? S.here : endId;
+}
+function reverseBtn(startId, endId) {
+  const from = reverseFrom(startId, endId);
+  const where = from !== endId ? ` from where you are (${roomName(from)})` : ` from ${roomName(endId)}`;
+  return `<button id="pathReverse" title="${escapeAttr("Route back to " + roomName(startId) + where)}">⇄ Reverse</button> `;
 }
 // "▶ Walk it" for the live link (live.js): types the route into the MUSH client 5 moves at a time.
 function walkHtml(startId, res) {
