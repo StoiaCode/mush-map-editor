@@ -93,13 +93,14 @@ function neighbourCell(r, dir) {
   const [dx, dy] = VEC[dir];
   return roomAtCell(r.z, r.x + dx, r.y + dy, spaceOf(r));
 }
-// A room with exactly this name that already has an exit INTO `from`: when the way out isn't
-// mapped, the way in usually is. Prefers the opposite direction (walking west out of B, the room
-// whose east exit leads into B). This is what finds the way back out of a space, whose grid has
-// nothing to do with the street outside, so looking at the next cell would be wrong.
+// A room with exactly this name whose exit in the OPPOSITE direction leads into `from`: when the
+// way out isn't mapped, the way in usually is (walking west out of B, the room whose east exit
+// leads into B). This is what finds the way back out of a space, whose grid has nothing to do with
+// the street outside, so looking at the next cell would be wrong. Only the opposite direction
+// counts: a room can have two exits to different rooms with the same name, and one that leads in
+// from another side is a different way, not this one.
 function linkedInto(from, dir, name) {
-  const into = Object.values(S.map.rooms).filter(r => r.name === name && Object.values(r.exits).includes(from.id));
-  return into.find(r => r.exits[OPP[dir]] === from.id) || (into.length === 1 ? into[0] : null);
+  return Object.values(S.map.rooms).find(r => r.name === name && r.exits[OPP[dir]] === from.id) || null;
 }
 // Where did "You move <dir> to <name>" put us? Most to least trusted:
 //   the mapped exit, when its name agrees → a room with that name that leads back into this one
