@@ -198,7 +198,7 @@ def delete_map(code):
 
 
 # ---------- Live relay (js/live.js, userscript/mush-mapper-bridge.user.js) ----------
-# Lets a PbN tab in another browser feed one mapper. That browser's bridge posts its game events to
+# Lets a PbN tab on another device feed one mapper. That device's bridge posts its game events to
 # "up" and polls "down" for commands; the mapper polls "up" and posts to "down". Memory only (a
 # restart just unlinks), each side keeps its last RELAY_KEEP items, and a link nobody has touched
 # for RELAY_TTL is dropped. Creating a link needs the client key; using one needs only its code.

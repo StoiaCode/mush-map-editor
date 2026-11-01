@@ -41,13 +41,13 @@
 //                                                paper stock.]", "There is nothing worth scavenging here."
 //                every client event also carries char: the character playing (journal title)
 //   mm_reply   {seq, lines, char}            mapper → client: shown as a local [MAPPER] chat line
-//   mm_relay   {code, api} | null            this browser's PbN tab feeds a mapper in ANOTHER browser
+//   mm_relay   {code, api} | null            this browser's PbN tab feeds a mapper on ANOTHER device
 //                                            through the site's relay (server/app.py), instead of a
 //                                            mapper here: events go to <api>/relay/<code>/up, commands
 //                                            come from .../down. Set from this browser's mapper page.
 //   mm_ping / mm_pong {id, char}             is a PbN tab there, and which character is it?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
-//                                            tab (an alt, say) neither doubles commands nor reports moves
+//                                            tab (a second window, say) neither doubles commands nor reports moves
 //   mm_mapper  tab id                        likewise only the most recently used mapper tab answers
 //                                            //goto, so two open mappers don't both start a walk
 (function () {
@@ -174,7 +174,7 @@
       if (GM_getValue('mm_relay')) { upQueue.push(ev); flushUp(); }
     }
 
-    // --- relay to a mapper in another browser (mm_relay) ---
+    // --- relay to a mapper on another device (mm_relay) ---
     // Up: every event, batched. Down: polled once a second while this tab is the active PbN tab.
     // A link the mapper ended (404) is forgotten, with a note in the chat.
     const myChar = c => !c || c === characterName();
@@ -189,7 +189,7 @@
         onload: x => {
           if (x.status === 404 && GM_getValue('mm_relay')) {
             GM_setValue('mm_relay', null);
-            localLine(['The link to the mapper in your other browser has ended.']);
+            localLine(['The link to the mapper on your other device has ended.']);
             return done(null);
           }
           try { done(x.status < 300 ? JSON.parse(x.responseText) : null); } catch (e) { done(null); }

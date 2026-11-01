@@ -39,7 +39,7 @@ import { API_BASE, CLIENT_KEY } from "./sync.js";
 // the userscript only moves messages around.
 //
 // Characters: one mapper can follow several characters at once, each with its own position, walk,
-// train ride and //goto list (charState). A second browser playing an alt feeds in through the
+// train ride and //goto list (charState). A PbN tab on another device feeds in through the
 // relay (see Relay below). Code that acts for a character runs inside withChar(name, …), which
 // points C at that character; everywhere else C is the focused one, the character the map follows
 // and the panel shows: whoever moved last, or whoever you clicked.
@@ -60,7 +60,7 @@ const DIR_OF = Object.fromEntries(Object.entries(DIRWORD).map(([k, w]) => [w, k]
 
 const L = {
   bridge: false,      // userscript answered on this page
-  sending: false,     // this browser's game goes to a mapper in another browser: stay out of it
+  sending: false,     // this browser's game goes to a mapper on another device: stay out of it
   follow: true,       // keep the view on the focused character
   window: 5,          // directions per input chain (the game's limit is 5)
   stallSec: 20,       // give up a walk after this long without a move
@@ -88,7 +88,7 @@ function charState(name) {
     gotoList: [], gotoFly: false, gotoPreview: false,   // the last numbered //goto list
     clientAt: 0,        // last sign of life from this character's MUSH tab
     seenAt: 0,          // last game event this session
-    via: "direct",      // "direct" (this browser's bridge) or "relay" (another browser)
+    via: "direct",      // "direct" (this browser's bridge) or "relay" (another device)
   };
 }
 function withChar(name, fn) {
@@ -701,8 +701,8 @@ function drawChip() {
   btn.classList.toggle("live-on", anyAlive || L.sending);
   btn.classList.toggle("live-update", bridgeOutdated());
   if (L.sending) {
-    btn.textContent = "📡 Sending to other browser";
-    btn.title = "This browser's game goes to a mapper in another browser.";
+    btn.textContent = "📡 Sending to linked device";
+    btn.title = "This browser's game goes to the mapper on a linked device.";
     return;
   }
   const W = C.W;
@@ -727,8 +727,8 @@ function buildLivePanel() {
   const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
   if (L.sending) {
     pill.className = "livepill on"; pill.textContent = "Sending";
-    body.innerHTML = `<div class="livecard"><div class="livelabel">Another browser's mapper</div>
-      <div class="livesub">This browser's PbN tab sends its moves to the mapper in your other browser, and walks
+    body.innerHTML = `<div class="livecard"><div class="livelabel">Linked device</div>
+      <div class="livesub">This browser's PbN tab sends its moves to the mapper on your linked device, and walks
       that mapper's routes. Nothing is tracked here, so this tab can be closed.</div>
       <div class="histbtns"><button class="livebtn danger" id="relayUnpair">Stop sending</button></div></div>`;
     on("relayUnpair", "onclick", () => { post("unpair"); });
@@ -751,7 +751,7 @@ function buildLivePanel() {
       const rm = roomOf(c);
       return `<button class="livechar${c.name === focus ? " on" : ""}" data-focus="${escapeAttr(c.name)}" title="Follow ${escapeAttr(c.name || "?")} on the map">
         <span class="livedot${alive(c) ? " on" : ""}"></span><b>${escapeHtml(c.name || "?")}</b>
-        <span class="livesub">${rm ? escapeHtml(rm.name) : "position unknown"}${c.via === "relay" ? " · other browser" : ""}${c.W ? " · 🚶" : ""}</span></button>`;
+        <span class="livesub">${rm ? escapeHtml(rm.name) : "position unknown"}${c.via === "relay" ? " · linked device" : ""}${c.W ? " · 🚶" : ""}</span></button>`;
     }).join("") + `</div>`;
   }
   h += `<div class="livecard">` + (r
@@ -873,9 +873,9 @@ document.getElementById("liveBtn").onclick = () => {
   positionPopover(panel, document.getElementById("liveBtn"));
 };
 
-// ---------- Relay: a PbN tab in another browser ----------
-// For an alt played in a second browser. This mapper makes a link on the site's API (server/app.py)
-// and shows its code; the other browser's mapper page hands the code to its bridge ("pair"), and
+// ---------- Relay: a PbN tab on another device ----------
+// This mapper makes a link on the site's API (server/app.py) and shows its code; the other
+// device's mapper page hands the code to its bridge ("pair"), and
 // from then on that browser's PbN tab posts its events to the link and polls it for commands,
 // while this mapper polls the events and posts the commands. This browser's own PbN tab stays on
 // the direct way. Only polls while a link exists, so nobody else ever talks to the server for it.
@@ -910,7 +910,7 @@ async function relayPoll() {
   R.busy = true;
   try {
     const res = await fetch(relayUrl(`/up?after=${R.after}`), { cache: "no-store" });
-    if (res.status === 404) return relayEnd("The link to your other browser has expired. Make a new one in the 📡 panel.");
+    if (res.status === 404) return relayEnd("The device link has expired. Make a new one in the 📡 panel.");
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     const first = R.after < 0;
@@ -955,19 +955,19 @@ setInterval(relayPoll, RELAY_POLL_MS);
 setInterval(() => { if (R.code) relayDown({ kind: "ping" }); }, RELAY_PING_MS);   // lets the other tab's //goto know we're here
 function relayHtml() {
   if (!L.bridge) return "";
-  let h = `<div class="livelabel livesettings">Another browser</div>`;
+  let h = `<div class="livelabel livesettings">Link another device</div>`;
   if (!R.code) {
-    return h + `<div class="livesetting"><div><div>Play an alt in a second browser</div>
+    return h + `<div class="livesetting"><div><div>Play from another device</div>
         <div class="livesub">Its moves show up on this map too, each character with their own marker</div></div></div>
-      <div class="histbtns"><button class="livebtn" id="relayCreate">Link a browser</button>
-        <button class="livebtn" id="relayJoin" title="Use in the second browser: enter the code shown by the mapper you want to feed">Enter a code…</button></div>`;
+      <div class="histbtns"><button class="livebtn" id="relayCreate">Link a device</button>
+        <button class="livebtn" id="relayJoin" title="Use on the other device: enter the code shown by the mapper you want to feed">Enter a code…</button></div>`;
   }
   const remote = Object.values(CH).filter(c => c.via === "relay" && alive(c));
   return h + `<div class="livesetting"><div><div>Link code</div>
-      <div class="livesub">In the other browser (bridge installed): open this mapper, 📡 → <b>Enter a code…</b></div></div></div>
+      <div class="livesub">On the other device (bridge installed): open this mapper, 📡 → <b>Enter a code…</b></div></div></div>
     <div class="relaycode"><code id="relayCode">${escapeHtml(R.code)}</code><button class="livebtn" id="relayCopy">Copy</button></div>
     <div class="livesub">${R.error ? escapeHtml(R.error) : remote.length ? "Connected: " + remote.map(c => escapeHtml(c.name || "?")).join(", ") :
-      "Waiting for the other browser's PbN tab…"}</div>
+      "Waiting for the other device's PbN tab…"}</div>
     <div class="histbtns"><button class="livebtn danger" id="relayUnlink">Unlink</button></div>`;
 }
 function wireRelay() {
@@ -979,7 +979,7 @@ function wireRelay() {
     navigator.clipboard.writeText(R.code).then(() => { b.textContent = "✓"; setTimeout(() => { b.textContent = "Copy"; }, 1000); }).catch(() => {});
   });
   on("relayJoin", async () => {
-    const code = (prompt("Code from the mapper in your other browser:") || "").trim();
+    const code = (prompt("Code from the mapper on your other device:") || "").trim();
     if (!code) return;
     try {
       const res = await fetch(`${API_BASE}/relay/${encodeURIComponent(code)}/down`, { cache: "no-store" });
@@ -1055,7 +1055,7 @@ window.addEventListener("message", e => {
     if (first) render();   // the inspector and path box grow live buttons
     return;
   }
-  if (L.sending) return;   // this browser's game is followed by the mapper in the other browser
+  if (L.sending) return;   // this browser's game is followed by the mapper on the linked device
   if (m.type === "client") {
     // a pong without a name (journal not loaded yet) still says the tab is there
     const name = m.char ? String(m.char) : pathChar.direct;
