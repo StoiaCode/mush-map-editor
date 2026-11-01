@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.5
+// @version      1.6.6
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -11,6 +11,10 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
+// @grant        GM_xmlhttpRequest
+// @connect      map.stoia.red
+// @connect      localhost
+// @connect      127.0.0.1
 // @noframes
 // @downloadURL  https://map.stoia.red/userscript/mush-mapper-bridge.user.js
 // @updateURL    https://map.stoia.red/userscript/mush-mapper-bridge.user.js
@@ -22,7 +26,7 @@
 //   client — philadelphiabynight.net/play. Watches chat for "You move <dir> to <room>." and
 //            types commands into the command box when asked.
 // Shared storage keys:
-//   mm_cmd     {seq, cmds}                   mapper → client: commands to type
+//   mm_cmd     {seq, cmds, char}             mapper → client: commands to type (only that character's tab)
 //   mm_evt     {events:[...]}                client → mapper, newest last:
 //                {seq, kind:'move', dir, name}   "You move <dir> to <name>.", sent at once
 //                {seq, kind:'room', room}        what the side panel shows (see readRoom), sent
@@ -36,7 +40,11 @@
 //                                                the game), or its result: "[You haul away 2 units of
 //                                                paper stock.]", "There is nothing worth scavenging here."
 //                every client event also carries char: the character playing (journal title)
-//   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
+//   mm_reply   {seq, lines, char}            mapper → client: shown as a local [MAPPER] chat line
+//   mm_relay   {code, api} | null            this browser's PbN tab feeds a mapper in ANOTHER browser
+//                                            through the site's relay (server/app.py), instead of a
+//                                            mapper here: events go to <api>/relay/<code>/up, commands
+//                                            come from .../down. Set from this browser's mapper page.
 //   mm_ping / mm_pong {id, char}             is a PbN tab there, and which character is it?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
 //                                            tab (an alt, say) neither doubles commands nor reports moves
@@ -46,7 +54,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.5';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.6';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -59,16 +67,23 @@
 
   function mapperRole() {
     const toPage = (type, data) => window.postMessage(Object.assign({ mm: 'bridge', type }, data || {}), location.origin);
-    const hello = () => toPage('hello', { v: VERSION });
+    const hello = () => toPage('hello', { v: VERSION, sending: !!GM_getValue('mm_relay') });
 
     window.addEventListener('message', e => {
       if (e.origin !== location.origin || !e.data || e.data.mm !== 'page') return;
       const m = e.data;
+      const char = typeof m.char === 'string' ? m.char : null;
       if (m.type === 'probe') hello();
       else if (m.type === 'send' && Array.isArray(m.cmds)) {
-        GM_setValue('mm_cmd', { seq: nextSeq(), cmds: m.cmds.map(String).slice(0, 20) });
+        GM_setValue('mm_cmd', { seq: nextSeq(), cmds: m.cmds.map(String).slice(0, 20), char });
       } else if (m.type === 'reply' && Array.isArray(m.lines)) {
-        GM_setValue('mm_reply', { seq: nextSeq(), lines: m.lines.map(String).slice(0, 15) });
+        GM_setValue('mm_reply', { seq: nextSeq(), lines: m.lines.map(String).slice(0, 15), char });
+      } else if (m.type === 'pair' && typeof m.code === 'string' && typeof m.api === 'string') {
+        GM_setValue('mm_relay', { code: m.code, api: m.api });
+        hello();
+      } else if (m.type === 'unpair') {
+        GM_setValue('mm_relay', null);
+        hello();
       }
     });
 
@@ -86,7 +101,7 @@
         lastEvt = ev.seq;
         const char = ev.char || null;
         if (ev.kind === 'room') toPage('room', { room: ev.room, char });
-        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q }); }
+        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q, char }); }
         else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char });
         else if (ev.kind === 'train') toPage('train', { text: ev.text, char });
         else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char });
@@ -156,7 +171,61 @@
       events.push(ev);
       while (events.length > 20) events.shift();
       GM_setValue('mm_evt', { events: events.slice() });
+      if (GM_getValue('mm_relay')) { upQueue.push(ev); flushUp(); }
     }
+
+    // --- relay to a mapper in another browser (mm_relay) ---
+    // Up: every event, batched. Down: polled once a second while this tab is the active PbN tab.
+    // A link the mapper ended (404) is forgotten, with a note in the chat.
+    const myChar = c => !c || c === characterName();
+    function relayReq(method, path, body) {
+      const r = GM_getValue('mm_relay');
+      if (!r) return Promise.resolve(null);
+      return new Promise(done => GM_xmlhttpRequest({
+        method, url: r.api.replace(/\/$/, '') + '/relay/' + encodeURIComponent(r.code) + path,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        data: body ? JSON.stringify(body) : undefined,
+        timeout: 8000,
+        onload: x => {
+          if (x.status === 404 && GM_getValue('mm_relay')) {
+            GM_setValue('mm_relay', null);
+            localLine(['The link to the mapper in your other browser has ended.']);
+            return done(null);
+          }
+          try { done(x.status < 300 ? JSON.parse(x.responseText) : null); } catch (e) { done(null); }
+        },
+        onerror: () => done(null), ontimeout: () => done(null),
+      }));
+    }
+    let upQueue = [], upBusy = false;
+    async function flushUp() {
+      if (upBusy || !upQueue.length) return;
+      upBusy = true;
+      const batch = upQueue.slice(0, 50);
+      const ok = await relayReq('POST', '/up', { items: batch });
+      if (ok) upQueue = upQueue.slice(batch.length);
+      else upQueue = upQueue.slice(-100);   // offline for a while: keep only the latest
+      upBusy = false;
+      if (ok && upQueue.length) flushUp();
+    }
+    let downAfter = -1, downBusy = false;
+    setInterval(async () => {
+      if (!onPlay || !isActive() || downBusy || !GM_getValue('mm_relay')) return;
+      downBusy = true;
+      const res = await relayReq('GET', '/down?after=' + downAfter);
+      downBusy = false;
+      if (!res) return;
+      if (downAfter >= 0) for (const m of res.items || []) {
+        if (m.kind === 'ping') mapperPinged();
+        else if (m.kind === 'cmd' && Array.isArray(m.cmds) && myChar(m.char)) sendLines(m.cmds.map(String).slice(0, 20));
+        else if (m.kind === 'reply' && Array.isArray(m.lines) && myChar(m.char)) localLine(m.lines.map(String).slice(0, 15));
+      }
+      downAfter = res.last;
+    }, 1000);
+    // tells the mapper this tab is alive and who's playing, like mm_pong does next door
+    setInterval(() => {
+      if (onPlay && isActive() && GM_getValue('mm_relay')) { upQueue.push({ kind: 'pong', char: characterName() }); flushUp(); }
+    }, 5000);
 
     const seen = new WeakSet();
     function processArticle(article) {
@@ -315,12 +384,18 @@
       return m ? m[1].trim() : null;
     }
     let mapperSeen = 0;   // mapper tabs ping every 5s
-    GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
+    // A mapper that just opened only knows where this character was last time: show it the room now.
+    function mapperPinged() {
+      const fresh = Date.now() - mapperSeen > 15000;
       mapperSeen = Date.now();
+      if (fresh && onPlay && isActive()) reportRoom(null);
+    }
+    GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
+      mapperPinged();
       if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName() });
     });
     GM_addValueChangeListener('mm_reply', (key, oldV, v) => {
-      if (isActive() && v && Array.isArray(v.lines)) localLine(v.lines);
+      if (isActive() && v && Array.isArray(v.lines) && myChar(v.char)) localLine(v.lines);
     });
 
     // --- //goto: caught before the game's own Enter handler, never sent to the server ---
@@ -384,7 +459,7 @@
       if (atBottom) container.scrollTop = container.scrollHeight;
     }
     GM_addValueChangeListener('mm_cmd', (key, oldV, v) => {
-      if (isActive() && v && Array.isArray(v.cmds)) sendLines(v.cmds);
+      if (isActive() && v && Array.isArray(v.cmds) && myChar(v.char)) sendLines(v.cmds);
     });
     window.addEventListener('focus', claim);
     document.addEventListener('keydown', claim, true);
