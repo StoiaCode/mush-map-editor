@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.6
+// @version      1.6.7
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -39,7 +39,9 @@
 //                {seq, kind:'gather', text}      "/scavenge" or "/harvest" was just sent (still goes to
 //                                                the game), or its result: "[You haul away 2 units of
 //                                                paper stock.]", "There is nothing worth scavenging here."
-//                every client event also carries char: the character playing (journal title)
+//                every client event also carries char: the name the journal shows (an Obfuscate
+//                mask shows the mask's name), and sess: a token per visit to /play. Switching
+//                characters always leaves /play, so names seen in one visit are one character.
 //   mm_reply   {seq, lines, char}            mapper → client: shown as a local [MAPPER] chat line
 //   mm_relay   {code, api} | null            this browser's PbN tab feeds a mapper on ANOTHER device
 //                                            through the site's relay (server/app.py), instead of a
@@ -54,7 +56,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.6';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.7';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -99,17 +101,17 @@
       for (const ev of (v && v.events) || []) {
         if (ev.seq <= lastEvt) continue;
         lastEvt = ev.seq;
-        const char = ev.char || null;
-        if (ev.kind === 'room') toPage('room', { room: ev.room, char });
-        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q, char }); }
-        else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char });
-        else if (ev.kind === 'train') toPage('train', { text: ev.text, char });
-        else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char });
-        else toPage('move', { dir: ev.dir, name: ev.name, char });
+        const char = ev.char || null, sess = ev.sess || null;
+        if (ev.kind === 'room') toPage('room', { room: ev.room, char, sess });
+        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q, char, sess }); }
+        else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char, sess });
+        else if (ev.kind === 'train') toPage('train', { text: ev.text, char, sess });
+        else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char, sess });
+        else toPage('move', { dir: ev.dir, name: ev.name, char, sess });
       }
     });
 
-    GM_addValueChangeListener('mm_pong', (key, oldV, v) => toPage('client', { char: (v && v.char) || null }));
+    GM_addValueChangeListener('mm_pong', (key, oldV, v) => toPage('client', { char: (v && v.char) || null, sess: (v && v.sess) || null }));
     const ping = () => GM_setValue('mm_ping', { id: nextSeq() });
     setInterval(ping, 5000);
     ping();
@@ -142,6 +144,7 @@
     const REFUSED_RE = /^You (?:can't|cannot|can not|are moving too quickly)\b/i;
 
     const tabId = Math.random().toString(36).slice(2);
+    let sess = null;   // token for this visit to /play (see mm_evt)
     const isActive = () => GM_getValue('mm_active') === tabId;
     let onPlay = false;
     const claim = () => { if (onPlay && !isActive()) GM_setValue('mm_active', tabId); };
@@ -167,7 +170,8 @@
     function push(ev) {
       if (!isActive()) return;
       ev.seq = nextSeq();
-      ev.char = characterName();   // the mapper forgets your position when this changes
+      ev.char = characterName();   // the mapper forgets your position when this changes...
+      ev.sess = sess;              // ...unless it's still the same visit to /play (a mask)
       events.push(ev);
       while (events.length > 20) events.shift();
       GM_setValue('mm_evt', { events: events.slice() });
@@ -224,7 +228,7 @@
     }, 1000);
     // tells the mapper this tab is alive and who's playing, like mm_pong does next door
     setInterval(() => {
-      if (onPlay && isActive() && GM_getValue('mm_relay')) { upQueue.push({ kind: 'pong', char: characterName() }); flushUp(); }
+      if (onPlay && isActive() && GM_getValue('mm_relay')) { upQueue.push({ kind: 'pong', char: characterName(), sess }); flushUp(); }
     }, 5000);
 
     const seen = new WeakSet();
@@ -392,7 +396,7 @@
     }
     GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
       mapperPinged();
-      if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName() });
+      if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName(), sess });
     });
     GM_addValueChangeListener('mm_reply', (key, oldV, v) => {
       if (isActive() && v && Array.isArray(v.lines) && myChar(v.char)) localLine(v.lines);
@@ -535,6 +539,7 @@
 
     function enter() {
       onPlay = true;
+      sess = Math.random().toString(36).slice(2);   // a new visit: possibly another character
       claim();
       if (mount()) return;
       waiter = new MutationObserver(() => { if (mount()) { waiter.disconnect(); waiter = null; } });
