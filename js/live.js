@@ -52,6 +52,7 @@ const L = {
   follow: true,       // keep the view on your position
   window: 5,          // directions per input chain (the game's limit is 5)
   stallSec: 20,       // give up a walk after this long without a move
+  char: null,         // character the position belongs to (from the bridge's events)
   seenName: null,     // name the MUSH gave for the current room, when it differs from the map's
   snap: null,         // last room snapshot from the side panel (bridge "room" message)
   bridgeV: null,      // version the installed bridge reported
@@ -74,10 +75,11 @@ function loadLive() {
     L.follow = o.follow !== false;
     L.window = clamp(parseInt(o.window, 10) || 5, 1, 5);
     L.stallSec = clamp(parseInt(o.stallSec, 10) || 20, 5, 300);
+    L.char = typeof o.char === "string" ? o.char : null;
   } catch (e) { /* private window etc: defaults are fine */ }
 }
 function saveLive() {
-  try { localStorage.setItem(LIVE_KEY, JSON.stringify({ here: S.here, follow: L.follow, window: L.window, stallSec: L.stallSec })); }
+  try { localStorage.setItem(LIVE_KEY, JSON.stringify({ here: S.here, follow: L.follow, window: L.window, stallSec: L.stallSec, char: L.char })); }
   catch (e) { /* ignore */ }
 }
 function post(type, data = {}) { window.postMessage({ mm: "page", type, ...data }, location.origin); }
@@ -174,6 +176,10 @@ function onRoom(snap) {
   if (!cur || cur.name !== snap.name) {
     const found = anchor(snap);
     if (found && found !== cur) setHere(found.id, snap.name);
+    // The panel shows another room than the one we think we're in, and no move explains it (a move
+    // along a mapped exit whose name is out of date sets seenName): we're somewhere else, e.g. a
+    // character switch or a teleport. Lost beats mapping and checking from the wrong room.
+    else if (!found && cur && !(L.seenName && norm(L.seenName) === norm(snap.name))) setHere(null);
   }
   if (automapOn()) autoFill(hereRoom(), snap);
   checkRoom(hereRoom(), snap);   // issues.js: where map and game disagree
@@ -810,6 +816,21 @@ window.addEventListener("message", e => {
     onGoto(m.q);
   }
 });
+// The position belongs to one character. Another one is somewhere else entirely: forget it (and
+// any walk) before their first event is used, so nothing gets mapped or checked from the old
+// character's room. Their room panel, which comes next, finds the new position.
+function noteCharacter(c) {
+  if (c === L.char) return;
+  const switched = !!L.char;
+  L.char = c;
+  setCharacter(c);   // history.js: their moves go on their own trail
+  if (switched) {
+    if (W) stopWalk("You switched characters.");
+    L.snap = null;
+    setHere(null);
+    toast(`👤 Switched to ${escapeHtml(c)}: finding where they are…`);
+  } else saveLive();
+}
 // Safety net against replayed chat (bridges before 1.6.2 re-read the whole chat when you switched
 // chat tabs): in-game moves take time, so game events never come fractions of a second apart.
 // Panel snapshots ("room") go through the same queue so they're never handled before the move
@@ -830,6 +851,7 @@ function queueGameEvent(m) {
       q = q.filter(e => e.type === "room");
     }
     for (const e of q) {
+      if (e.char) noteCharacter(String(e.char));
       if (e.type === "room") onRoom(e.room);
       else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
       else if (e.type === "sys") onSys(String(e.text || ""));

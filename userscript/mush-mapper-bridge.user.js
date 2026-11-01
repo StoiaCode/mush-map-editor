@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.4
+// @version      1.6.5
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -35,6 +35,7 @@
 //                {seq, kind:'gather', text}      "/scavenge" or "/harvest" was just sent (still goes to
 //                                                the game), or its result: "[You haul away 2 units of
 //                                                paper stock.]", "There is nothing worth scavenging here."
+//                every client event also carries char: the character playing (journal title)
 //   mm_reply   {seq, lines}                  mapper → client: shown as a local [MAPPER] chat line
 //   mm_ping / mm_pong {id, char}             is a PbN tab there, and which character is it?
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
@@ -45,7 +46,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.4';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.5';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -83,12 +84,13 @@
       for (const ev of (v && v.events) || []) {
         if (ev.seq <= lastEvt) continue;
         lastEvt = ev.seq;
-        if (ev.kind === 'room') toPage('room', { room: ev.room });
+        const char = ev.char || null;
+        if (ev.kind === 'room') toPage('room', { room: ev.room, char });
         else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q }); }
-        else if (ev.kind === 'sys') toPage('sys', { text: ev.text });
-        else if (ev.kind === 'train') toPage('train', { text: ev.text });
-        else if (ev.kind === 'gather') toPage('gather', { text: ev.text });
-        else toPage('move', { dir: ev.dir, name: ev.name });
+        else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char });
+        else if (ev.kind === 'train') toPage('train', { text: ev.text, char });
+        else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char });
+        else toPage('move', { dir: ev.dir, name: ev.name, char });
       }
     });
 
@@ -150,6 +152,7 @@
     function push(ev) {
       if (!isActive()) return;
       ev.seq = nextSeq();
+      ev.char = characterName();   // the mapper forgets your position when this changes
       events.push(ev);
       while (events.length > 20) events.shift();
       GM_setValue('mm_evt', { events: events.slice() });
@@ -426,6 +429,15 @@
       reportRoom(null);   // where we are right now, so the mapper can anchor without a move
       return true;
     }
+    // Switching characters puts you somewhere else, often without a chat line: report the new
+    // character's room right away, so the mapper re-finds the position instead of guessing.
+    let lastChar = null;
+    setInterval(() => {
+      if (!onPlay) return;
+      const c = characterName();
+      if (c && lastChar && c !== lastChar) reportRoom(null);
+      if (c) lastChar = c;
+    }, 1000);
     // PbN may also replace the chat box itself; pick the new one up (its contents count as old)
     setInterval(() => {
       if (!onPlay || !chatBox) return;
