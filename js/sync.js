@@ -6,13 +6,13 @@ import { enterPreview } from "./preview.js";
 // Relative by default (reverse-proxied alongside the frontend in production). Can be
 // overridden (e.g. localStorage.setItem("mushSyncApiBase", "http://host:port/api")) for
 // local testing against a standalone API instance.
-const API_BASE = localStorage.getItem("mushSyncApiBase") || "/api";
+export const API_BASE = localStorage.getItem("mushSyncApiBase") || "/api";
 
 // Not real auth - this ships readable in the JS bundle. It's a filter against generic
 // spam bots that probe for open POST endpoints without knowing to send this header.
 // The placeholder below is substituted at container start (docker-entrypoint.sh) from
 // the CLIENT_KEY env var, which must match the API server's CLIENT_KEY (see compose.yaml).
-const CLIENT_KEY = "__CLIENT_KEY__";
+export const CLIENT_KEY = "__CLIENT_KEY__";
 
 function setStatus(msg, kind) {
   const el = document.getElementById("syncStatus");

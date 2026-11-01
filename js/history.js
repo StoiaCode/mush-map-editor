@@ -109,12 +109,13 @@ function roomIdx(room) {
   }
   return i;
 }
-// Called by live.js whenever the position changes.
-export function recordMove(roomId) {
-  if (!H.ready || !H.char) return;
+// Called by live.js whenever a character's position changes.
+export function recordMove(roomId, name) {
+  name = (name || H.char || "").trim();
+  if (!H.ready || !name) return;
   const room = S.map.rooms[roomId];
   if (!room) return;
-  const c = charIdx(H.char);
+  const c = charIdx(name);
   if (H.last[c] === roomId) return;
   H.last[c] = roomId;
   const ev = { t: Date.now(), c, r: roomIdx(room) };

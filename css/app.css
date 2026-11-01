@@ -464,6 +464,26 @@ select { cursor: pointer; }
 }
 @keyframes herepulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(1.08); } }
 @media (prefers-reduced-motion: reduce) { .room.here::after { animation: none; } }
+/* other characters followed by the live link: a dashed blue ring with their name */
+.room.here2:not(.here)::after {
+  content: ""; position: absolute; inset: -7px; border: 2px dashed #5b9dff; border-radius: 12px; pointer-events: none;
+}
+.room.here2:not(.here)::before {
+  content: attr(data-who); position: absolute; top: -15px; z-index: 1; left: 50%; transform: translateX(-50%);
+  background: #5b9dff; color: #0b1424; font-size: 9px; font-weight: 800; letter-spacing: .3px; white-space: nowrap;
+  padding: 1px 5px; border-radius: 6px; pointer-events: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+}
+.room.here.here2::before { content: "you · " attr(data-who); white-space: nowrap; }
+.livechar { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 1px solid transparent;
+  border-radius: 7px; padding: 4px 6px; color: inherit; cursor: pointer; flex-wrap: wrap; }
+.livechar:hover { background: rgba(255,255,255,.04); }
+.livechar.on { border-color: rgba(61,220,132,.45); }
+.livechar .livesub { flex-basis: 100%; padding-left: 14px; margin: 0; }
+.livedot { width: 8px; height: 8px; border-radius: 50%; background: #5a6372; flex: none; }
+.livedot.on { background: #3ddc84; }
+.relaycode { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.relaycode code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; padding: 4px 6px;
+  border-radius: 6px; background: rgba(255,255,255,.06); user-select: all; }
 #liveBtn { font-size: 11px; color: var(--muted); }
 #liveBtn.live-on { color: #3ddc84; border-color: rgba(61,220,132,.5); }
 #livePanel { width: 300px; padding: 12px 14px 14px; }

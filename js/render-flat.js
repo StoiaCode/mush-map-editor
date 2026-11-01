@@ -347,6 +347,7 @@ export function makeRoomEl(r, ghost) {
     + (!ghost && r.id === S.pathStart ? " linksource" : "")
     + (!ghost && S.pathRooms.has(r.id) ? " pathhit" : "")
     + (!ghost && r.id === S.here ? " here" : "")
+    + (!ghost && S.alts[r.id] ? " here2" : "")
     + (r.auto ? " autoroom" : "")
     + (!ghost && S.searchTerm && S.searchMatches.includes(r.id) ? " searchhit" : "")
     + (!ghost && S.capture ? captureClass(r) : "");
@@ -372,6 +373,7 @@ export function makeRoomEl(r, ghost) {
   if (ghost) el.style.opacity = S.onion.opacity;
   const tag = S.map.tagLabels && S.map.tagLabels[r.color];
   el.title = r.name + (tag ? "  ·  " + tag : "");
+  if (!ghost && S.alts[r.id]) el.dataset.who = S.alts[r.id];   // other characters standing here (live.js)
   el.innerHTML = `<span class="rname">${escapeHtml(r.name)}</span>`;
   if (!ghost) {
     if (r.exits.UP)   el.appendChild(markDoor(vbadge("up", "↑", r.exitFly && r.exitFly.UP), r, "UP"));

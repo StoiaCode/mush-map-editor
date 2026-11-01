@@ -1,6 +1,6 @@
 import { DIRWORD, VEC, COMPASS, GRID_N, OPP } from "./constants.js";
 import { S, viewport } from "./state.js";
-import { escapeHtml, clamp } from "./utils.js";
+import { escapeHtml, escapeAttr, clamp } from "./utils.js";
 import { spaceOf, curSpace, roomAtCell, createRoom, deleteRoom } from "./model.js";
 import { commit } from "./persistence.js";
 import { render } from "./app.js";
@@ -13,12 +13,14 @@ import { computePath, findPath } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
 import { onGather, gatherHtml } from "./gather.js";
-import { setCharacter, currentCharacter, recordMove, historyHtml, wireHistory, onHistoryChange } from "./history.js";
+import { setCharacter, recordMove, historyHtml, wireHistory, onHistoryChange } from "./history.js";
+import { API_BASE, CLIENT_KEY } from "./sync.js";
 
 // ---------- Live link to the MUSH web client ----------
 // The MUSH client is another site, so this page can't touch it. The bridge userscript
 // (userscript/mush-mapper-bridge.user.js) runs on both pages and relays through its own storage:
-//   bridge → page  {mm:"bridge", type:"hello"}               userscript is installed
+//   bridge → page  {mm:"bridge", type:"hello", sending}      userscript is installed (sending: this
+//                                                            browser feeds a mapper elsewhere, see Relay)
 //                  {mm:"bridge", type:"client", char}        the MUSH tab answered a ping (char: who's playing)
 //                  {mm:"bridge", type:"move", dir, name}     MUSH printed "You move <dir> to <name>."
 //                  {mm:"bridge", type:"goto", q}             "//goto <q>" typed in the PbN client
@@ -27,14 +29,24 @@ import { setCharacter, currentCharacter, recordMove, historyHtml, wireHistory, o
 //                  {mm:"bridge", type:"gather", text}        /scavenge or /harvest sent, or its result (gather.js)
 //                  {mm:"bridge", type:"room", room}          the side panel caught up: {name, description,
 //                                                            image, exits:{N:{name,locked,aerial}}, grid:{N:name}}
+//                  game events (move…room, goto) also carry char: the character they belong to
 //   page → bridge  {mm:"page", type:"probe"}                 ask for a hello
-//                  {mm:"page", type:"send", cmds:[...]}      type these into the MUSH client
-//                  {mm:"page", type:"reply", lines:[...]}    show as a local [MAPPER] line in PbN's chat
+//                  {mm:"page", type:"send", cmds, char}      type these into that character's MUSH tab
+//                  {mm:"page", type:"reply", lines, char}    show as a local [MAPPER] line in PbN's chat
+//                  {mm:"page", type:"pair", code, api}       feed this browser's game to another mapper
+//                  {mm:"page", type:"unpair"}                ...and stop
 // All the logic (where you are, what to send next) lives here so it updates with the site;
 // the userscript only moves messages around.
 //
+// Characters: one mapper can follow several characters at once, each with its own position, walk,
+// train ride and //goto list (charState). A second browser playing an alt feeds in through the
+// relay (see Relay below). Code that acts for a character runs inside withChar(name, …), which
+// points C at that character; everywhere else C is the focused one, the character the map follows
+// and the panel shows: whoever moved last, or whoever you clicked.
+//
 // Position: follow the reported direction along the map's exits. The direction is what the game
-// actually did, the room name is only a cross-check, since mapped names can be stale.
+// actually did, the room name is only a cross-check, since mapped names can be stale. A position
+// is only "sure" (safe to map and check from) once the game's room panel has confirmed it.
 //
 // Walking: the game takes a chain of up to 5 directions as ONE input ("north north east") and
 // refuses inputs sent while you're still moving ("You are moving too quickly"). So send a chain of
@@ -48,47 +60,105 @@ const DIR_OF = Object.fromEntries(Object.entries(DIRWORD).map(([k, w]) => [w, k]
 
 const L = {
   bridge: false,      // userscript answered on this page
-  clientAt: 0,        // last time the MUSH tab answered a ping
-  follow: true,       // keep the view on your position
+  sending: false,     // this browser's game goes to a mapper in another browser: stay out of it
+  follow: true,       // keep the view on the focused character
   window: 5,          // directions per input chain (the game's limit is 5)
   stallSec: 20,       // give up a walk after this long without a move
-  char: null,         // character the position belongs to (from the bridge's events)
-  seenName: null,     // name the MUSH gave for the current room, when it differs from the map's
-  snap: null,         // last room snapshot from the side panel (bridge "room" message)
   bridgeV: null,      // version the installed bridge reported
   latestV: null,      // @version of the bridge file this site serves
-  gotoList: [],       // room ids of the last numbered //goto list, for "//goto 2"
-  gotoFly: false,     // ...and whether that list was a "//goto fly" one
-  gotoPreview: false, // ...or a "//goto ?" one
-  riding: null,       // name of the train line you're aboard, from "You step aboard the ..."
 };
-let W = null;         // running walk: { steps:[{dir,toId}], sent, done, lastMove, note, timer }
 
-export const liveBridge = () => L.bridge;
-export const clientAlive = () => Date.now() - L.clientAt < CLIENT_STALE_MS;
-export const walking = () => !!W;
+// ---------- Characters ----------
+const CH = {};                              // name -> charState
+let saved = {};                             // name -> room id, as the last session left them
+let focus = "";                             // the character the map follows and the panel shows
+let C = null;                               // the character the code is acting for (see withChar)
+let depth = 0;
+const pathChar = { direct: null, relay: null };   // who is playing on each way in
+function charState(name) {
+  name = name || "";
+  return CH[name] ||= {
+    name,
+    here: saved[name] || null,
+    sure: false,        // a room panel confirmed `here` (a remembered position isn't, yet)
+    seenName: null,     // name the MUSH gave for the current room, when it differs from the map's
+    snap: null,         // last room snapshot from the side panel (bridge "room" message)
+    riding: null,       // name of the train line aboard, from "You step aboard the ..."
+    W: null,            // running walk: { steps:[{dir,toId}], sent, done, lastMove, timer, ... }
+    gotoList: [], gotoFly: false, gotoPreview: false,   // the last numbered //goto list
+    clientAt: 0,        // last sign of life from this character's MUSH tab
+    seenAt: 0,          // last game event this session
+    via: "direct",      // "direct" (this browser's bridge) or "relay" (another browser)
+  };
+}
+function withChar(name, fn) {
+  const prev = C;
+  C = charState(name); depth++;
+  try { return fn(); }
+  finally { depth--; C = depth ? prev : charState(focus); }
+}
+const alive = c => Date.now() - c.clientAt < CLIENT_STALE_MS;
+const known = () => Object.values(CH).filter(c => c.seenAt || alive(c));
+// several characters in play: messages say whose they are
+const who = () => known().length > 1 ? `<b>${escapeHtml(C.name || "?")}</b>: ` : "";
+// The map follows this one. Their markers: S.here for the focused character, S.alts for the rest.
+function setFocus(name) {
+  if (focus === name) return;
+  focus = name;
+  if (!depth) C = charState(name);
+  setCharacter(name);   // history.js labels and records under this name
+  syncMarkers(); saveLive();
+  const r = roomOf(charState(name));
+  if (r && L.follow) followTo(r);
+  render(); updateChip(); refreshLivePanel();
+}
+function syncMarkers() {
+  if (!S.map) { S.here = charState(focus).here; S.alts = {}; return; }   // still loading: checked again on use
+  S.here = roomOf(charState(focus)) ? charState(focus).here : null;
+  const alts = {};
+  for (const c of known()) {
+    if (c.name === focus || !roomOf(c)) continue;
+    alts[c.here] = alts[c.here] ? alts[c.here] + ", " + (c.name || "?") : (c.name || "?");
+  }
+  S.alts = alts;
+}
+const roomOf = c => c && c.here && S.map ? S.map.rooms[c.here] || null : null;
+
+export const liveBridge = () => L.bridge && !L.sending;
+export const clientAlive = () => alive(C);
+export const walking = () => !!(C && C.W);
+export function liveCharacter() { return C ? C.name : ""; }
 
 function loadLive() {
   try {
     const o = JSON.parse(localStorage.getItem(LIVE_KEY) || "{}");
-    S.here = o.here || null;
+    saved = o.chars && typeof o.chars === "object" ? o.chars : {};
+    if (o.here && !o.chars) saved[o.char || ""] = o.here;   // saved before there were several
+    focus = typeof o.focus === "string" ? o.focus : (o.char || "");
     L.follow = o.follow !== false;
     L.window = clamp(parseInt(o.window, 10) || 5, 1, 5);
     L.stallSec = clamp(parseInt(o.stallSec, 10) || 20, 5, 300);
-    L.char = typeof o.char === "string" ? o.char : null;
   } catch (e) { /* private window etc: defaults are fine */ }
+  C = charState(focus);
+  syncMarkers();
 }
 function saveLive() {
-  try { localStorage.setItem(LIVE_KEY, JSON.stringify({ here: S.here, follow: L.follow, window: L.window, stallSec: L.stallSec, char: L.char })); }
+  for (const c of Object.values(CH)) saved[c.name] = c.here;
+  try { localStorage.setItem(LIVE_KEY, JSON.stringify({ chars: saved, focus, follow: L.follow, window: L.window, stallSec: L.stallSec })); }
   catch (e) { /* ignore */ }
 }
 function post(type, data = {}) { window.postMessage({ mm: "page", type, ...data }, location.origin); }
+// to the acting character's MUSH tab, whichever way it's connected
+function sendCmds(cmds) {
+  if (C.via === "relay") relayDown({ kind: "cmd", char: C.name, cmds });
+  else post("send", { cmds, char: C.name });
+}
 
 // ---------- Position ----------
 const norm = s => (s || "").toLowerCase().replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
-export function hereRoom() { return S.here ? S.map.rooms[S.here] || null : null; }
-// known position whose name agrees with the game's: safe to write things onto that room
-export function positionSure() { return !!hereRoom() && !L.seenName; }
+export function hereRoom() { return roomOf(C); }
+// known position, confirmed by the game, whose name agrees with it: safe to write things onto that room
+export function positionSure() { return !!hereRoom() && C.sure && !C.seenName; }
 
 function neighbourCell(r, dir) {
   if (dir === "UP" || dir === "DOWN") return roomAtCell(r.z + (dir === "UP" ? 1 : -1), r.x, r.y, spaceOf(r));
@@ -109,7 +179,7 @@ function linkedInto(from, dir, name) {
 //   (exit not linked this way yet) → a room in that cell with that name → the only room anywhere
 //   with that name (we were tracking the wrong room) → the mapped exit anyway (its name is
 //   probably just out of date) → lost.
-export function resolveMove(from, dir, name) {
+function resolveMove(from, dir, name) {
   const want = norm(name);
   const viaExit = from && dir ? S.map.rooms[from.exits[dir]] || null : null;
   if (viaExit && norm(viaExit.name) === want) return viaExit;
@@ -122,15 +192,22 @@ export function resolveMove(from, dir, name) {
   if (viaExit) return viaExit;
   return null;
 }
-export function setHere(id, seenName) {
-  S.here = id && S.map.rooms[id] ? id : null;
-  if (S.here && L.bridge && clientAlive()) recordMove(S.here);   // history.js
+// Moves the acting character.
+function place(id, seenName) {
+  C.here = id && S.map.rooms[id] ? id : null;
+  if (C.here && L.bridge && alive(C)) recordMove(C.here, C.name);   // history.js
   const r = hereRoom();
-  L.seenName = r && seenName && norm(seenName) !== norm(r.name) ? seenName : null;
-  saveLive();
-  if (r && L.follow) followTo(r);
+  C.seenName = r && seenName && norm(seenName) !== norm(r.name) ? seenName : null;
+  if (!r) C.sure = false;
+  syncMarkers(); saveLive();
+  if (r && L.follow && C.name === focus) followTo(r);
   render();
   refreshLivePanel();
+}
+// 📍 I'm here (inspector): you said so, which is as sure as it gets.
+export function setHere(id) {
+  place(id);
+  C.sure = !!C.here;
 }
 // Switch to the room's space/layer if needed, and re-centre only when it's near the edge,
 // so the map doesn't jerk on every single step.
@@ -171,16 +248,23 @@ function onRoom(snap) {
   // (aerial)"), but flight exits often skip several tiles: that name says nothing about where it
   // goes. Dropped here, before anything compares or links by it (issues.js, autoFill).
   for (const ex of Object.values(snap.exits || {})) if (ex && ex.aerial) ex.name = null;
-  L.snap = snap;
+  C.snap = snap;
   const cur = hereRoom();
   if (!cur || cur.name !== snap.name) {
     const found = anchor(snap);
-    if (found && found !== cur) setHere(found.id, snap.name);
+    if (found && found !== cur) { place(found.id, snap.name); C.sure = true; }
     // The panel shows another room than the one we think we're in, and no move explains it (a move
     // along a mapped exit whose name is out of date sets seenName): we're somewhere else, e.g. a
     // character switch or a teleport. Lost beats mapping and checking from the wrong room.
-    else if (!found && cur && !(L.seenName && norm(L.seenName) === norm(snap.name))) setHere(null);
+    else if (!found && cur && !(C.seenName && norm(C.seenName) === norm(snap.name))) place(null);
+  } else if (!C.sure) {
+    // The name agrees. With several rooms of that name, the mini-map has to agree too.
+    const twins = Object.values(S.map.rooms).filter(r => r.name === snap.name).length > 1;
+    const best = twins ? anchor(snap) : cur;
+    if (best && best !== cur) place(best.id, snap.name);
+    if (best) C.sure = true;
   }
+  if (!C.sure) return;   // not sure where this is: don't write anything onto the map from it
   if (automapOn()) autoFill(hereRoom(), snap);
   checkRoom(hereRoom(), snap);   // issues.js: where map and game disagree
 }
@@ -214,7 +298,7 @@ function linkBoth(a, dir, b, fly) {
 // Called on a move along an exit the map doesn't have yet. Returns the room we're now in, or null.
 let autoWarned = false;   // autoStep explained why it stopped: don't bury that under "Lost"
 function autoStep(from, dir, name) {
-  const took = L.snap && L.snap.name === from.name && L.snap.exits ? L.snap.exits[dir] : null;
+  const took = C.snap && C.snap.name === from.name && C.snap.exits ? C.snap.exits[dir] : null;
   const fly = !!(took && took.aerial);
   // already mapped the other way round (e.g. back out of a space): link it, build nothing
   const back = linkedInto(from, dir, name);
@@ -226,7 +310,7 @@ function autoStep(from, dir, name) {
   const cell = neighbourCell(from, dir);
   if (cell) {
     if (cell.name !== name) {
-      toast(`🤖 Auto-map: ${DIRWORD[dir]} of “${escapeHtml(from.name)}” your map has “${escapeHtml(cell.name)}”, ` +
+      toast(`🤖 ${who()}Auto-map: ${DIRWORD[dir]} of “${escapeHtml(from.name)}” your map has “${escapeHtml(cell.name)}”, ` +
         `but the game says “${escapeHtml(name)}”. Left alone; maybe it belongs in a space.`);
       autoWarned = true;
       return null;
@@ -291,8 +375,9 @@ function autoFill(r, snap) {
 
 function onMove(word, name) {
   const dir = DIR_OF[(word || "").toLowerCase()] || null;
-  if (dir && hereRoom()) noteArrived(hereRoom(), dir, name);
-  L.riding = null;
+  if (dir && positionSure()) noteArrived(hereRoom(), dir, name);
+  C.riding = null;
+  const W = C.W;
   if (W) {
     const exp = W.steps[W.done];
     if (exp.train) {
@@ -302,7 +387,7 @@ function onMove(word, name) {
     } else {
       W.done++; W.lastMove = Date.now();
       if (W.done > W.sent) W.sent = W.done;   // it walked a step we'd taken back after "too quickly"
-      setHere(exp.toId, name);   // the route's room is the mapped exit we meant to take
+      place(exp.toId, name);   // the route's room is the mapped exit we meant to take
       if (W.done === W.steps.length) finishWalk(); else pump();
       updateChip();
       return;
@@ -311,58 +396,61 @@ function onMove(word, name) {
   const from = hereRoom();
   let to = null;
   autoWarned = false;
-  if (automapOn() && from && !L.seenName && dir && !from.exits[dir]) to = autoStep(from, dir, name);
+  if (automapOn() && positionSure() && dir && !from.exits[dir]) to = autoStep(from, dir, name);
   if (!to) to = resolveMove(from, dir, name);
-  if (!to && S.here && !autoWarned) toast(`📍 Lost: “${escapeHtml(name)}” isn't on the map (or not uniquely). Select it and press 📍 I'm here.`);
-  setHere(to ? to.id : null, name);
+  if (!to && C.here && !autoWarned) toast(`📍 ${who()}Lost: “${escapeHtml(name)}” isn't on the map (or not uniquely). Select it and press 📍 I'm here.`);
+  place(to ? to.id : null, name);
 }
 
 // ---------- Walking a route ----------
 // res is a findPath() result. Walk steps go out in chains; a train leg is one step of its own,
-// ridden with /train wait + /train stop (see Trains below).
+// ridden with /train wait + /train stop (see Trains below). Walks the acting character.
 export function startWalk(res, fromGame = false) {
-  if (W) stopWalk(null);
+  if (C.W) stopWalk(null);
   const steps = res.steps.map((s, i) => s.type === "train"
     ? { train: true, lineName: s.lineName, toId: s.toId }
     : { dir: s.dir, toId: res.rooms[i + 1] });
-  const note = null;
   if (!steps.length) { toast("Nothing to walk."); return; }
-  if (!clientAlive()) { toast("📡 No MUSH tab answering. Open (or click into) the MUSH client tab first."); return; }
-  setHere(res.rooms[0]);   // you start the walk at the route's start
-  W = { steps, sent: 0, done: 0, lastMove: Date.now(), note, timer: null, fromGame, retries: 0, phase: null };
-  W.timer = setInterval(() => {
+  if (!alive(C)) { toast(`📡 ${who()}No MUSH tab answering. Open (or click into) the MUSH client tab first.`); return; }
+  place(res.rooms[0]);   // you start the walk at the route's start
+  const name = C.name;
+  const W = C.W = { steps, sent: 0, done: 0, lastMove: Date.now(), timer: null, fromGame, retries: 0, phase: null };
+  W.timer = setInterval(() => withChar(name, () => {
     // waiting for and riding a train take real time: no stall timeout then
-    if (W && W.sent > W.done && W.phase !== "waiting" && W.phase !== "riding" && Date.now() - W.lastMove > L.stallSec * 1000)
+    if (C.W === W && W.sent > W.done && W.phase !== "waiting" && W.phase !== "riding" && Date.now() - W.lastMove > L.stallSec * 1000)
       stopWalk(W.phase ? `The train didn't answer for ${L.stallSec}s.` : `No movement for ${L.stallSec}s (locked door, blocked, or you stopped?).`);
-  }, 1000);
+  }), 1000);
   pump();
   updateChip(); refreshLivePanel();
 }
 // Next chain, once the previous one has fully arrived. A short pause first: sent the instant the
 // last move lands, the game may still count you as moving.
 const CHAIN_GAP_MS = 300;
-function pump(delay = W.sent ? CHAIN_GAP_MS : 0) {
+function pump(delay) {
+  const W = C.W, name = C.name;
+  if (delay === undefined) delay = W.sent ? CHAIN_GAP_MS : 0;
   if (W.sent > W.done || W.sent >= W.steps.length || W.pending) return;
-  W.pending = setTimeout(() => {
-    if (!W) return;
+  W.pending = setTimeout(() => withChar(name, () => {
+    if (C.W !== W) return;
     W.pending = null;
     if (W.steps[W.sent].train) {
       // boards at once if the doors are open, otherwise when the train comes in
-      post("send", { cmds: ["/train wait"] });
+      sendCmds(["/train wait"]);
       W.sent++; W.phase = "requested"; W.lastMove = Date.now();
       updateChip(); refreshLivePanel();
       return;
     }
     let n = 0;   // a chain stops short of a train leg
     while (n < L.window && W.sent + n < W.steps.length && !W.steps[W.sent + n].train) n++;
-    post("send", { cmds: [W.steps.slice(W.sent, W.sent + n).map(s => DIRWORD[s.dir]).join(" ")] });
+    sendCmds([W.steps.slice(W.sent, W.sent + n).map(s => DIRWORD[s.dir]).join(" ")]);
     W.sent += n;
     W.lastMove = Date.now();   // the stall clock starts when the chain goes out
-  }, delay);
+  }), delay);
 }
 // The game refused something. "Too quickly" means the chain wasn't taken: send what's left of it
 // again after a pause. Anything else ("You can't go that way.") ends the walk right away.
 function onSys(text) {
+  const W = C.W;
   if (!W || W.sent === W.done) return;
   if (/moving too quickly/i.test(text) && W.retries < 2) {
     W.retries++;
@@ -374,25 +462,26 @@ function onSys(text) {
   stopWalk(`The game said: “${escapeHtml(text)}”`);
 }
 function finishWalk() {
+  const W = C.W;
   const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
-  const note = W.note, fromGame = W.fromGame;
-  clearInterval(W.timer); clearTimeout(W.pending); W = null;
-  toast(`🏁 Arrived at <b>${escapeHtml(dest ? dest.name : "?")}</b>.` + (note ? " " + note : ""));
-  if (fromGame) reply(`Arrived at ${dest ? dest.name : "?"}.` + (note ? " " + plain(note) : ""));
+  clearInterval(W.timer); clearTimeout(W.pending); C.W = null;
+  toast(`🏁 ${who()}Arrived at <b>${escapeHtml(dest ? dest.name : "?")}</b>.`);
+  if (W.fromGame) reply(`Arrived at ${dest ? dest.name : "?"}.`);
   walkEnded();
 }
 // why = null: replaced by a new walk, say nothing.
 export function stopWalk(why) {
+  const W = C.W;
   if (!W) return;
   // mid train leg: stop waiting, or drop the chosen stop (cancel aboard keeps you on the train)
-  if (W.phase && W.sent > W.done) post("send", { cmds: ["/train cancel"] });
-  const queued = W.phase ? 0 : Math.max(0, W.sent - W.done), left = W.steps.length - W.done, fromGame = W.fromGame;
-  clearInterval(W.timer); clearTimeout(W.pending); W = null;
+  if (W.phase && W.sent > W.done) sendCmds(["/train cancel"]);
+  const queued = W.phase ? 0 : Math.max(0, W.sent - W.done), left = W.steps.length - W.done;
+  clearInterval(W.timer); clearTimeout(W.pending); C.W = null;
   if (why !== null) {
     const msg = `Walk stopped. ${why || ""} ${left} step${left !== 1 ? "s" : ""} left` +
       (queued ? `, up to ${queued} more may still be walked from the last input.` : ".");
-    toast("⏹ " + msg);
-    if (fromGame) reply(plain(msg));
+    toast("⏹ " + who() + msg);
+    if (W.fromGame) reply(plain(msg));
   }
   walkEnded();
 }
@@ -425,29 +514,31 @@ function stationNamed(name) {
 }
 function onTrain(text) {
   let m;
-  if ((m = TRAIN.aboard.exec(text))) L.riding = m[1];
+  if ((m = TRAIN.aboard.exec(text))) C.riding = m[1];
+  const W = C.W;
   const step = W && W.steps[W.done];
   if (step && step.train && W.sent > W.done && trainStep(step, text)) return;
   // position, walking or not
   if ((m = TRAIN.off.exec(text))) {
-    L.riding = null;
+    C.riding = null;
     const st = stationNamed(m[1]);
-    if (st) setHere(st.id, m[1]);
-  } else if ((m = TRAIN.arriving.exec(text)) && L.riding) {
+    if (st) place(st.id, m[1]);
+  } else if ((m = TRAIN.arriving.exec(text)) && C.riding) {
     const st = stationNamed(m[1]);
-    if (st) setHere(st.id, m[1]);   // the ring rides along
+    if (st) place(st.id, m[1]);   // the ring rides along
   }
   updateChip(); refreshLivePanel();
 }
 // The current walk step is a train leg. Returns true when it fully handled the line.
 function trainStep(step, text) {
+  const W = C.W;
   const dest = S.map.rooms[step.toId];
   let m;
   W.lastMove = Date.now();
   if (TRAIN.waiting.test(text)) { W.phase = "waiting"; }
   else if (TRAIN.aboard.test(text)) {
     W.phase = "aboard";
-    post("send", { cmds: [`/train stop ${dest.name}`] });
+    sendCmds([`/train stop ${dest.name}`]);
   } else if ((m = TRAIN.stopSet.exec(text))) {
     if (m[1] !== dest.name) {
       stopWalk(`The game set your stop to “${escapeHtml(m[1])}” instead of “${escapeHtml(dest.name)}”, so I cancelled it. You're still aboard.`);
@@ -459,14 +550,14 @@ function trainStep(step, text) {
     stopWalk(`You missed your stop at ${escapeHtml(dest.name)} and are still on the train.`);
     return true;
   } else if ((m = TRAIN.off.exec(text))) {
-    L.riding = null;
+    C.riding = null;
     if (m[1] !== dest.name) {
       W.phase = null;   // already off the train: nothing to cancel
       stopWalk(`You got off at ${escapeHtml(m[1])}, not ${escapeHtml(dest.name)}.`);
       return false;     // the general handler still moves the ring to where you got off
     }
     W.done++; W.sent = W.done; W.phase = null;
-    setHere(dest.id, m[1]);
+    place(dest.id, m[1]);
     if (W.done === W.steps.length) finishWalk(); else pump();
     updateChip(); refreshLivePanel();
     return true;
@@ -481,7 +572,11 @@ function trainStep(step, text) {
 // "//goto stop" stops a walk, a bare "//goto" says where the mapper thinks you are.
 // Ground-only unless you say "//goto fly <room>": lifting off in public breaches the Masquerade,
 // so flight is never picked up silently from the route box's checkbox (/stalk first is on you).
-function reply(...lines) { post("reply", { lines }); }
+// Runs for the character whose tab it was typed in, and answers there.
+function reply(...lines) {
+  if (C.via === "relay") relayDown({ kind: "reply", char: C.name, lines });
+  else post("reply", { lines, char: C.name });
+}
 // toast HTML → chat text: drop tags, undo escapeHtml/escapeAttr ("Broad &amp; Market" → "Broad & Market")
 const plain = html => String(html).replace(/<[^>]+>/g, "")
   .replace(/&(lt|gt|quot|amp);/g, (_, e) => ({ lt: "<", gt: ">", quot: '"', amp: "&" }[e]));
@@ -541,13 +636,13 @@ function gotoRoomFromGame(target, fly, preview = false) {
     (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "");
   if (preview) {
     // "//goto 1" walks exactly this room, even when other rooms share its name
-    L.gotoList = [target.id]; L.gotoFly = !!fly; L.gotoPreview = false;
+    C.gotoList = [target.id]; C.gotoFly = !!fly; C.gotoPreview = false;
     const unique = Object.values(S.map.rooms).filter(r => r.name === target.name).length === 1;
     return reply(`Route to ${target.name}: ${summary}.`, routeText(res),
       (unique ? `//goto ${fly ? "fly " : ""}${target.name} or ` : "") + "//goto 1 to walk it.");
   }
   startWalk(res, true);
-  if (!W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
+  if (!C.W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
   reply(`Walking to ${target.name}: ${summary}. //goto stop to stop.`);
 }
 function onGoto(q) {
@@ -558,13 +653,13 @@ function onGoto(q) {
     return reply(r ? `You are in ${r.name} (${roomLocation(r)}).` : "I don't know where you are yet.");
   }
   if (/^stop$/i.test(q)) {
-    if (!W) return reply("Not walking.");
+    if (!C.W) return reply("Not walking.");
     return stopWalk("Stopped from the game.");
   }
   if (/^(help|\?)$/i.test(q)) return reply(...GOTO_HELP);
-  if (/^\d+$/.test(q) && L.gotoList.length) {
-    const r = S.map.rooms[L.gotoList[parseInt(q, 10) - 1]];
-    return r ? gotoRoomFromGame(r, L.gotoFly, L.gotoPreview) : reply(`Pick a number from 1 to ${L.gotoList.length}.`);
+  if (/^\d+$/.test(q) && C.gotoList.length) {
+    const r = S.map.rooms[C.gotoList[parseInt(q, 10) - 1]];
+    return r ? gotoRoomFromGame(r, C.gotoFly, C.gotoPreview) : reply(`Pick a number from 1 to ${C.gotoList.length}.`);
   }
   // Leading switches, in any order: "fly" allows flight exits, "?" previews without walking.
   // Only the first of each counts, so a room starting with "fly" is "//goto fly fly trap".
@@ -586,9 +681,9 @@ function onGoto(q) {
     return { r, steps: res ? res.steps.length : (here && here.id === r.id ? 0 : Infinity) };
   }).sort((a, b) => a.steps - b.steps || a.r.name.localeCompare(b.r.name));
   const shown = rows.slice(0, 8);
-  L.gotoList = shown.map(x => x.r.id);
-  L.gotoFly = fly;
-  L.gotoPreview = preview;
+  C.gotoList = shown.map(x => x.r.id);
+  C.gotoFly = fly;
+  C.gotoPreview = preview;
   reply(`${hits.length} rooms match "${q}":`,
     ...shown.map((x, i) => `${i + 1}. ${x.r.name} · ${roomLocation(x.r)}` +
       (x.steps === Infinity ? (here ? " · no route" : "") : x.steps === 0 ? " · you are here" : ` · ${x.steps} step${x.steps !== 1 ? "s" : ""}`)),
@@ -596,51 +691,80 @@ function onGoto(q) {
 }
 
 // ---------- Toolbar chip + panel ----------
-function updateChip() {
+// Both always show the focused character, even when redrawn while acting for another one.
+function updateChip() { withChar(focus, drawChip); }
+function drawChip() {
   const btn = document.getElementById("liveBtn");
   if (!btn) return;
   btn.style.display = L.bridge ? "" : "none";
-  const alive = clientAlive();
-  btn.classList.toggle("live-on", alive);
+  const anyAlive = Object.values(CH).some(alive);
+  btn.classList.toggle("live-on", anyAlive || L.sending);
   btn.classList.toggle("live-update", bridgeOutdated());
+  if (L.sending) {
+    btn.textContent = "📡 Sending to other browser";
+    btn.title = "This browser's game goes to a mapper in another browser.";
+    return;
+  }
+  const W = C.W;
   const issues = issueCount();
-  const train = W && W.phase === "waiting" ? "🚆 waiting" : L.riding ? `🚆 ${L.riding}` : null;
-  btn.textContent = (train || (W ? `🚶 ${W.done}/${W.steps.length}` : alive ? "📡 Live" : "📡 No MUSH tab")) +
+  const train = W && W.phase === "waiting" ? "🚆 waiting" : C.riding ? `🚆 ${C.riding}` : null;
+  btn.textContent = (train || (W ? `🚶 ${W.done}/${W.steps.length}` : anyAlive ? "📡 Live" : "📡 No MUSH tab")) +
     (issues ? ` · ⚠${issues}` : "") + (automapOn() ? " · 🤖" : "");
   btn.title = bridgeOutdated() ? "A newer version of the bridge userscript is available. Click to update." :
     W ? "Walking a route. Click for details or to stop." :
-    alive ? "Linked to the MUSH client: following your position." :
+    anyAlive ? "Linked to the MUSH client: following your position." :
     "The bridge userscript is installed, but no MUSH client tab is answering. Open the client, or click into it.";
 }
 export function refreshLivePanel() {
   const panel = document.getElementById("livePanel");
   if (!panel || panel.style.display !== "block") return;
   if (panel.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // don't eat a half-typed number
-  buildLivePanel();
+  withChar(focus, buildLivePanel);
 }
 function buildLivePanel() {
   const body = document.getElementById("liveBody");
-  const r = hereRoom();
-  const alive = clientAlive();
   const pill = document.getElementById("liveStatus");
-  pill.className = "livepill" + (alive ? " on" : "");
-  pill.textContent = alive ? "Connected" : "No MUSH tab";
+  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
+  if (L.sending) {
+    pill.className = "livepill on"; pill.textContent = "Sending";
+    body.innerHTML = `<div class="livecard"><div class="livelabel">Another browser's mapper</div>
+      <div class="livesub">This browser's PbN tab sends its moves to the mapper in your other browser, and walks
+      that mapper's routes. Nothing is tracked here, so this tab can be closed.</div>
+      <div class="histbtns"><button class="livebtn danger" id="relayUnpair">Stop sending</button></div></div>`;
+    on("relayUnpair", "onclick", () => { post("unpair"); });
+    return;
+  }
+  const r = hereRoom();
+  const anyAlive = Object.values(CH).some(alive);
+  pill.className = "livepill" + (anyAlive ? " on" : "");
+  pill.textContent = anyAlive ? "Connected" : "No MUSH tab";
 
   let h = "";
   if (bridgeOutdated()) {
     h += `<div class="livecard liveupdate"><div><b>Bridge update</b><div class="livesub">${escapeHtml(L.bridgeV)} → ${escapeHtml(L.latestV)}</div></div>
       <a class="livebtn primary" href="${BRIDGE_URL}" target="_blank" rel="noopener">Update</a></div>`;
   }
+  // several characters: one row each, click to follow that one
+  const chars = known();
+  if (chars.length > 1 || (chars.length === 1 && chars[0].name !== focus)) {
+    h += `<div class="livecard"><div class="livelabel">Characters</div>` + chars.map(c => {
+      const rm = roomOf(c);
+      return `<button class="livechar${c.name === focus ? " on" : ""}" data-focus="${escapeAttr(c.name)}" title="Follow ${escapeAttr(c.name || "?")} on the map">
+        <span class="livedot${alive(c) ? " on" : ""}"></span><b>${escapeHtml(c.name || "?")}</b>
+        <span class="livesub">${rm ? escapeHtml(rm.name) : "position unknown"}${c.via === "relay" ? " · other browser" : ""}${c.W ? " · 🚶" : ""}</span></button>`;
+    }).join("") + `</div>`;
+  }
   h += `<div class="livecard">` + (r
-    ? `<div class="livelabel">${currentCharacter() ? escapeHtml(currentCharacter()) + " is in" : "You are in"}</div>
+    ? `<div class="livelabel">${C.name ? escapeHtml(C.name) + " is in" : "You are in"}</div>
        <div class="livehere">
          <button class="liveroom" id="liveGoto" title="Show on the map">${escapeHtml(r.name)}</button>
-         <button class="liveicon" id="liveForget" title="Forget my position">✕</button>
+         <button class="liveicon" id="liveForget" title="Forget this position">✕</button>
        </div>
-       <div class="livesub">${escapeHtml(roomLocation(r))}</div>`
-    : `<div class="livelabel">You are in</div>
-       <div class="livesub">Unknown. Move once in the game, or select your room and press <b>📍 I'm here</b>.</div>`) +
+       <div class="livesub">${escapeHtml(roomLocation(r))}${C.sure ? "" : " · not confirmed by the game yet"}</div>`
+    : `<div class="livelabel">${C.name ? escapeHtml(C.name) + " is in" : "You are in"}</div>
+       <div class="livesub">Unknown. Move once in the game, or select the room and press <b>📍 I'm here</b>.</div>`) +
     `</div>`;
+  const W = C.W;
   if (W) {
     const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
     const pct = Math.round(W.done / W.steps.length * 100);
@@ -671,8 +795,9 @@ function buildLivePanel() {
       `<button class="livebtn" id="autoVerifyAll" title="Mark every auto-created room ✓ Verified">Verify all (${autos.length})</button>` +
       `<button class="livebtn danger" id="autoDelAll" title="Delete every unverified auto-created room">Delete all (${autos.length})</button></div>`;
   }
-  h += `<div class="livelabel livesettings">Gathering</div>` + gatherHtml();
+  h += `<div class="livelabel livesettings">Gathering${C.name ? " · " + escapeHtml(C.name) : ""}</div>` + gatherHtml();
   h += historyHtml();
+  h += relayHtml();
   h += `<div class="livelabel livesettings">Settings</div>
     <div class="livesetting">
       <div><div>Follow my position</div><div class="livesub">Keep the map centred on you</div></div>
@@ -689,11 +814,11 @@ function buildLivePanel() {
   if (automapOn()) h += `<div class="liveauto">🤖 Auto-map is on</div>`;
   body.innerHTML = h;
 
-  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
+  body.querySelectorAll("[data-focus]").forEach(b => b.onclick = () => setFocus(b.dataset.focus));
   on("liveGoto", "onclick", () => gotoRoom(r.id));
   on("liveStop", "onclick", () => stopWalk("Stopped by you."));
   on("liveFollow", "onchange", e => { L.follow = e.target.checked; saveLive(); if (L.follow && r) followTo(r); });
-  on("liveForget", "onclick", () => setHere(null));
+  on("liveForget", "onclick", () => place(null));
   on("liveGhostClear", "onclick", () => { clearGhosts(); buildLivePanel(); });
   wireIssues(body, buildLivePanel);
   on("autoDelRecent", "onclick", () => deleteAutoRooms(true));
@@ -706,6 +831,7 @@ function buildLivePanel() {
     toast(`✓ Verified ${list.length} room${list.length !== 1 ? "s" : ""}.`);
   });
   wireHistory();
+  wireRelay();
   on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
@@ -718,7 +844,7 @@ function deleteAutoRooms(recentOnly) {
   if (!confirm(`Delete ${ids.length} unverified auto-created room${ids.length !== 1 ? "s" : ""}` +
     `${recentOnly ? " from the last hour" : ""}? Exits to them are removed too. Ctrl+Z undoes it.`)) return;
   for (const id of ids) deleteRoom(id);
-  if (S.here && !S.map.rooms[S.here]) setHere(null);
+  for (const c of Object.values(CH)) if (c.here && !S.map.rooms[c.here]) withChar(c.name, () => place(null));
   commit(); render(); buildLivePanel();
   toast(`🗑 Deleted ${ids.length} auto-created room${ids.length !== 1 ? "s" : ""}.`);
 }
@@ -746,6 +872,122 @@ document.getElementById("liveBtn").onclick = () => {
   buildLivePanel();
   positionPopover(panel, document.getElementById("liveBtn"));
 };
+
+// ---------- Relay: a PbN tab in another browser ----------
+// For an alt played in a second browser. This mapper makes a link on the site's API (server/app.py)
+// and shows its code; the other browser's mapper page hands the code to its bridge ("pair"), and
+// from then on that browser's PbN tab posts its events to the link and polls it for commands,
+// while this mapper polls the events and posts the commands. This browser's own PbN tab stays on
+// the direct way. Only polls while a link exists, so nobody else ever talks to the server for it.
+const RELAY_KEY = "mushMapEditor.relay.v1";
+const RELAY_POLL_MS = 1000, RELAY_PING_MS = 5000;
+const R = { code: null, after: -1, busy: false, out: [], outBusy: false, seenAt: 0, error: null };
+const relayUrl = path => `${API_BASE}/relay/${encodeURIComponent(R.code)}${path}`;
+function loadRelay() { try { R.code = localStorage.getItem(RELAY_KEY) || null; } catch (e) { /* ignore */ } }
+function saveRelay() { try { R.code ? localStorage.setItem(RELAY_KEY, R.code) : localStorage.removeItem(RELAY_KEY); } catch (e) { /* ignore */ } }
+async function relayCreate() {
+  try {
+    const res = await fetch(`${API_BASE}/relay`, { method: "POST", headers: { "X-Client-Key": CLIENT_KEY } });
+    if (!res.ok) throw new Error(res.status);
+    R.code = (await res.json()).code; R.after = -1; R.seenAt = 0; R.error = null;
+    saveRelay();
+  } catch (e) {
+    toast("📡 Couldn't reach the server to make a link. Try again in a moment.");
+  }
+  refreshLivePanel();
+}
+function relayEnd(why) {
+  const code = R.code;
+  R.code = null; R.out = []; saveRelay();
+  for (const c of Object.values(CH)) if (c.via === "relay") withChar(c.name, () => { if (C.W) stopWalk(null); C.clientAt = 0; });
+  pathChar.relay = null;
+  if (why === "unlink" && code) fetch(`${API_BASE}/relay/${encodeURIComponent(code)}`, { method: "DELETE", headers: { "X-Client-Key": CLIENT_KEY } }).catch(() => {});
+  else if (why) toast("📡 " + why);
+  updateChip(); refreshLivePanel();
+}
+async function relayPoll() {
+  if (!R.code || R.busy) return;
+  R.busy = true;
+  try {
+    const res = await fetch(relayUrl(`/up?after=${R.after}`), { cache: "no-store" });
+    if (res.status === 404) return relayEnd("The link to your other browser has expired. Make a new one in the 📡 panel.");
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+    const first = R.after < 0;
+    R.after = j.last; R.error = null;
+    if (!first) for (const ev of j.items || []) onRelayItem(ev);
+  } catch (e) {
+    R.error = "Can't reach the server right now.";
+  } finally { R.busy = false; }
+}
+function onRelayItem(ev) {
+  if (!ev || typeof ev !== "object") return;
+  R.seenAt = Date.now();
+  const name = typeof ev.char === "string" && ev.char ? ev.char : pathChar.relay || "";
+  if (ev.kind === "pong") {
+    notePath("relay", name);
+    charState(name).clientAt = Date.now();
+    updateChip(); refreshLivePanel();
+    return;
+  }
+  if (["move", "room", "sys", "train", "gather", "goto"].includes(ev.kind))
+    handleEvent({ ...ev, type: ev.kind, char: name }, "relay");
+}
+function relayDown(item) {
+  if (!R.code) return;
+  R.out.push(item);
+  flushDown();
+}
+async function flushDown() {
+  if (R.outBusy || !R.out.length || !R.code) return;
+  R.outBusy = true;
+  const batch = R.out.slice(0, 50);
+  let ok = false;
+  try {
+    const res = await fetch(relayUrl("/down"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: batch }) });
+    if (res.ok) { R.out = R.out.slice(batch.length); ok = true; }
+  } catch (e) { /* offline: try again with the next item or ping */ }
+  R.outBusy = false;
+  if (R.out.length > 100) R.out = R.out.slice(-100);
+  if (ok && R.out.length) flushDown();   // queued while this batch was on its way
+}
+setInterval(relayPoll, RELAY_POLL_MS);
+setInterval(() => { if (R.code) relayDown({ kind: "ping" }); }, RELAY_PING_MS);   // lets the other tab's //goto know we're here
+function relayHtml() {
+  if (!L.bridge) return "";
+  let h = `<div class="livelabel livesettings">Another browser</div>`;
+  if (!R.code) {
+    return h + `<div class="livesetting"><div><div>Play an alt in a second browser</div>
+        <div class="livesub">Its moves show up on this map too, each character with their own marker</div></div></div>
+      <div class="histbtns"><button class="livebtn" id="relayCreate">Link a browser</button>
+        <button class="livebtn" id="relayJoin" title="Use in the second browser: enter the code shown by the mapper you want to feed">Enter a code…</button></div>`;
+  }
+  const remote = Object.values(CH).filter(c => c.via === "relay" && alive(c));
+  return h + `<div class="livesetting"><div><div>Link code</div>
+      <div class="livesub">In the other browser (bridge installed): open this mapper, 📡 → <b>Enter a code…</b></div></div></div>
+    <div class="relaycode"><code id="relayCode">${escapeHtml(R.code)}</code><button class="livebtn" id="relayCopy">Copy</button></div>
+    <div class="livesub">${R.error ? escapeHtml(R.error) : remote.length ? "Connected: " + remote.map(c => escapeHtml(c.name || "?")).join(", ") :
+      "Waiting for the other browser's PbN tab…"}</div>
+    <div class="histbtns"><button class="livebtn danger" id="relayUnlink">Unlink</button></div>`;
+}
+function wireRelay() {
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+  on("relayCreate", relayCreate);
+  on("relayUnlink", () => relayEnd("unlink"));
+  on("relayCopy", () => {
+    const b = document.getElementById("relayCopy");
+    navigator.clipboard.writeText(R.code).then(() => { b.textContent = "✓"; setTimeout(() => { b.textContent = "Copy"; }, 1000); }).catch(() => {});
+  });
+  on("relayJoin", async () => {
+    const code = (prompt("Code from the mapper in your other browser:") || "").trim();
+    if (!code) return;
+    try {
+      const res = await fetch(`${API_BASE}/relay/${encodeURIComponent(code)}/down`, { cache: "no-store" });
+      if (!res.ok) throw new Error(res.status);
+    } catch (e) { toast("📡 That code doesn't work (mistyped, or the link was ended)."); return; }
+    post("pair", { code, api: new URL(API_BASE, location.href).href });
+  });
+}
 
 // ---------- Bridge updates ----------
 // Userscript managers only look for updates about once a day, so tell bridge users when the file
@@ -802,34 +1044,63 @@ window.addEventListener("message", e => {
     const first = !L.bridge;
     L.bridge = true;
     L.bridgeV = m.v ? String(m.v) : null;
+    if (L.sending !== !!m.sending) {
+      L.sending = !!m.sending;
+      if (L.sending && R.code) relayEnd("unlink");   // can't both feed another mapper and be fed
+      render();
+    }
     if (first) checkBridgeVersion();
-    updateChip();
+    updateChip(); refreshLivePanel();
     document.getElementById("bridgeOffer").style.display = "none";
     if (first) render();   // the inspector and path box grow live buttons
-  } else if (m.type === "client") {
-    L.clientAt = Date.now();
-    if (m.char) setCharacter(String(m.char));
+    return;
+  }
+  if (L.sending) return;   // this browser's game is followed by the mapper in the other browser
+  if (m.type === "client") {
+    // a pong without a name (journal not loaded yet) still says the tab is there
+    const name = m.char ? String(m.char) : pathChar.direct;
+    if (name !== null) {
+      if (m.char) notePath("direct", name);
+      charState(name).clientAt = Date.now();
+    }
     updateChip(); refreshLivePanel();
   } else if (["move", "sys", "train", "gather", "room"].includes(m.type) && S.map) {
     queueGameEvent(m);
   } else if (m.type === "goto") {
-    onGoto(m.q);
+    handleEvent(m, "direct");
   }
 });
-// The position belongs to one character. Another one is somewhere else entirely: forget it (and
-// any walk) before their first event is used, so nothing gets mapped or checked from the old
-// character's room. Their room panel, which comes next, finds the new position.
-function noteCharacter(c) {
-  if (c === L.char) return;
-  const switched = !!L.char;
-  L.char = c;
-  setCharacter(c);   // history.js: their moves go on their own trail
-  if (switched) {
-    if (W) stopWalk("You switched characters.");
-    L.snap = null;
-    setHere(null);
-    toast(`👤 Switched to ${escapeHtml(c)}: finding where they are…`);
-  } else saveLive();
+// One game event, for the character it belongs to. Moving (or typing //goto) puts that character
+// in focus: it's the one being played right now.
+function handleEvent(e, via) {
+  const name = typeof e.char === "string" && e.char ? e.char : pathChar[via] || "";
+  notePath(via, name);
+  withChar(name, () => {
+    C.via = via; C.seenAt = C.clientAt = Date.now();
+    if (e.type === "move" || e.type === "goto" || !known().some(c => c.name === focus)) setFocus(name);
+    if (e.type === "room") onRoom(e.room);
+    else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
+    else if (e.type === "sys") onSys(String(e.text || ""));
+    else if (e.type === "train") onTrain(String(e.text || ""));
+    else if (e.type === "gather") { onGather(String(e.text || "")); refreshLivePanel(); }
+    else if (e.type === "goto") onGoto(e.q);
+  });
+}
+// Each way in (this browser's bridge, the relay) plays one character at a time. When it reports
+// another one, that browser switched characters: the one before has left the game there, so their
+// walk stops, and the new one's remembered position needs the game's confirmation before anything
+// is mapped from it (the room panel the bridge sends right after a switch does that).
+function notePath(via, name) {
+  const prev = pathChar[via];
+  if (prev === name) return;
+  pathChar[via] = name;
+  const c = charState(name);
+  c.via = via; c.sure = false;
+  if (prev === null) return;
+  withChar(prev, () => { if (C.W) stopWalk("You switched characters."); C.clientAt = 0; C.sure = false; });
+  if (focus === prev) setFocus(name);
+  toast(`👤 Switched to ${escapeHtml(name || "another character")}: finding where they are…`);
+  syncMarkers(); render();
 }
 // Safety net against replayed chat (bridges before 1.6.2 re-read the whole chat when you switched
 // chat tabs): in-game moves take time, so game events never come fractions of a second apart.
@@ -838,6 +1109,7 @@ function noteCharacter(c) {
 // destination). They don't count toward a burst and are kept even in one: they show the panel as
 // it really is.
 // They're held for a moment; BURST_N or more in one rush are a replay and are dropped together.
+// Only for this browser's bridge: the relay needs a current one, which never replays.
 const BURST_N = 4, BURST_QUIET_MS = 150;
 let gameQ = [], gameTimer = null;
 function queueGameEvent(m) {
@@ -850,19 +1122,14 @@ function queueGameEvent(m) {
       toast(`⚠ Ignored ${lines} game lines that arrived at once (old chat shown again?). Update the bridge if this repeats.`);
       q = q.filter(e => e.type === "room");
     }
-    for (const e of q) {
-      if (e.char) noteCharacter(String(e.char));
-      if (e.type === "room") onRoom(e.room);
-      else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
-      else if (e.type === "sys") onSys(String(e.text || ""));
-      else if (e.type === "train") onTrain(String(e.text || ""));
-      else if (e.type === "gather") { onGather(String(e.text || "")); refreshLivePanel(); }
-    }
+    for (const e of q) handleEvent(e, "direct");
   }, BURST_QUIET_MS);
 }
-setInterval(() => { if (L.bridge) { updateChip(); refreshLivePanel(); } }, 5000);   // notice a closed MUSH tab
+// notice a closed MUSH tab, and drop markers of characters that went quiet
+setInterval(() => { if (L.bridge) { const before = JSON.stringify(S.alts); syncMarkers(); if (JSON.stringify(S.alts) !== before) render(); updateChip(); refreshLivePanel(); } }, 5000);
 onIssuesChange(() => { updateChip(); refreshLivePanel(); });
 onHistoryChange(() => refreshLivePanel());
 window.addEventListener("hashchange", () => { updateChip(); if (automapOn()) toast("🤖 Auto-map on"); });
 loadLive();
+loadRelay();
 post("probe");

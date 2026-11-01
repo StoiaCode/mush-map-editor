@@ -50,6 +50,7 @@ export const S = {
   previewBackup: null,      // { map, history, histIdx, selection state, viewport } to restore on exit
   capture: null,            // open "move into a space" preview (capture.js); blocks other editing while set
   here: null,               // room the player is in, tracked live from the MUSH client (live.js); per browser, not in the map
+  alts: {},                 // room id -> names of the other characters standing there (live.js)
 };
 
 // ---------- DOM ----------

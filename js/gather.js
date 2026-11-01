@@ -4,7 +4,7 @@ import { commit } from "./persistence.js";
 import { render } from "./app.js";
 import { toast } from "./spaces.js";
 import { escapeHtml } from "./utils.js";
-import { hereRoom, positionSure, automapOn } from "./live.js";
+import { hereRoom, positionSure, automapOn, liveCharacter } from "./live.js";
 
 // ---------- Scavenging & harvesting (live.js) ----------
 // The bridge reports when /scavenge or /harvest is sent, and the result lines. From that:
@@ -20,8 +20,8 @@ import { hereRoom, positionSure, automapOn } from "./live.js";
 //             known yet → (auto-map) "Unknown scavenge"/"Unknown harvest", if the room has no mark
 //             of that kind yet
 // Every room always yields the same material. Traits made here carry `gather: "scavenge"|"harvest"`.
-// Separately, per browser: successful hauls per game night (cap 4 each; the night turns over at
-// 17:00 Berlin time) and which rooms you've tapped tonight, dimmed on the map.
+// Separately, per browser and character: successful hauls per game night (cap 4 each; the night
+// turns over at 17:00 Berlin time) and which rooms they've tapped tonight, dimmed on the map.
 
 const FAIL_WAIT_MS = 6000;
 const NIGHT_CAP = 4;
@@ -52,14 +52,25 @@ export function nightId(now = Date.now()) {
 }
 
 const NIGHT_KEY = "mushMapEditor.gather.v1";
-let N = { night: "", scavenge: [], harvest: [] };   // room ids with a successful haul tonight
+// { night, by: { character: { scavenge: [room ids], harvest: [...] } } }: successful hauls tonight
+let N = { night: "", by: {} };
 function loadNight() {
-  try { const o = JSON.parse(localStorage.getItem(NIGHT_KEY) || "{}"); if (o && o.night) N = { scavenge: [], harvest: [], ...o }; }
-  catch (e) { /* no storage: counts just start at zero */ }
-  if (N.night !== nightId()) N = { night: nightId(), scavenge: [], harvest: [] };
+  try {
+    const o = JSON.parse(localStorage.getItem(NIGHT_KEY) || "{}");
+    if (o && o.night) N = { night: o.night, by: o.by || {} };
+    // saved before counts were per character: whoever plays first tonight takes them over
+    if (o && Array.isArray(o.scavenge)) N.legacy = { scavenge: o.scavenge, harvest: o.harvest || [] };
+  } catch (e) { /* no storage: counts just start at zero */ }
+  if (N.night !== nightId()) N = { night: nightId(), by: {} };
 }
-function saveNight() { try { localStorage.setItem(NIGHT_KEY, JSON.stringify(N)); } catch (e) { /* ignore */ } }
-function tonight() { if (N.night !== nightId()) { N = { night: nightId(), scavenge: [], harvest: [] }; saveNight(); } return N; }
+function saveNight() { try { localStorage.setItem(NIGHT_KEY, JSON.stringify({ night: N.night, by: N.by })); } catch (e) { /* ignore */ } }
+// the acting character's counts (live.js decides who that is)
+function tonight() {
+  if (N.night !== nightId()) { N = { night: nightId(), by: {} }; saveNight(); }
+  const who = liveCharacter();
+  if (!N.by[who]) { N.by[who] = N.legacy || { scavenge: [], harvest: [] }; delete N.legacy; }
+  return N.by[who];
+}
 loadNight();
 
 export function tappedTonight(roomId) { const n = tonight(); return n.scavenge.includes(roomId) || n.harvest.includes(roomId); }

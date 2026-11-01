@@ -133,6 +133,11 @@ export function render3d() {
     ctx3d.lineWidth = isSel ? 3 : 1;
     roundRect3d(p.sx - half, p.sy - half, sz, sz, Math.min(8, half * 0.4));
     ctx3d.fill(); ctx3d.stroke();
+    if (S.alts[r.id]) {   // another character (live.js): dashed blue, inside the green one
+      ctx3d.strokeStyle = "#5b9dff"; ctx3d.lineWidth = 2; ctx3d.setLineDash([5, 4]);
+      roundRect3d(p.sx - half - 6, p.sy - half - 6, sz + 12, sz + 12, Math.min(11, half * 0.4 + 6));
+      ctx3d.stroke(); ctx3d.setLineDash([]);
+    }
     if (r.id === S.here) {
       ctx3d.strokeStyle = "#3ddc84"; ctx3d.lineWidth = 3;
       roundRect3d(p.sx - half - 8, p.sy - half - 8, sz + 16, sz + 16, Math.min(12, half * 0.4 + 8));
