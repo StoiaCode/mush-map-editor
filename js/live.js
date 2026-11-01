@@ -12,8 +12,8 @@ import { stationLinesFor } from "./model.js";
 import { computePath, findPath } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
-import { onGather, gatherHtml } from "./gather.js";
-import { setCharacter, recordMove, historyHtml, wireHistory, onHistoryChange } from "./history.js";
+import { onGather, gatherHtml, mergeNightCounts } from "./gather.js";
+import { setCharacter, recordMove, recordedSteps, renameHistoryChar, historyHtml, wireHistory, onHistoryChange } from "./history.js";
 import { API_BASE, CLIENT_KEY } from "./sync.js";
 
 // ---------- Live link to the MUSH web client ----------
@@ -66,6 +66,7 @@ const L = {
   stallSec: 20,       // give up a walk after this long without a move
   bridgeV: null,      // version the installed bridge reported
   latestV: null,      // @version of the bridge file this site serves
+  namesOpen: false,   // the panel shows the focused character's names (masks)
 };
 
 // ---------- Characters ----------
@@ -76,7 +77,7 @@ let C = null;                               // the character the code is acting 
 let depth = 0;
 const pathChar = { direct: null, relay: null };   // who is playing on each way in
 function charState(name) {
-  name = name || "";
+  name = canon(name || "");
   return CH[name] ||= {
     name,
     here: saved[name] || null,
@@ -89,7 +90,105 @@ function charState(name) {
     clientAt: 0,        // last sign of life from this character's MUSH tab
     seenAt: 0,          // last game event this session
     via: "direct",      // "direct" (this browser's bridge) or "relay" (another device)
+    shown: null,        // the name the journal shows right now, when it's a mask
   };
+}
+
+// ---------- Masks ----------
+// Obfuscate masks change the name the journal (and so the bridge) reports. The bridge also sends a
+// token per visit to /play, and switching characters always leaves /play: every name seen in one
+// visit is the same character. Those names are grouped under one main name, everything else being
+// an alias of it, remembered from then on (logging in with a known mask on is recognised at once).
+// Which name is the main one can't be told from the game (you can go from mask to mask without the
+// real name ever showing), so it's yours to pick in the 📡 panel; until then it's the name this
+// mapper has known longest. A picked main name is never changed by anything automatic.
+const ALIAS_KEY = "mushMapEditor.aliases.v1";
+// alias: name -> name it stands for; first/seen: name -> first/last seen (ms); picked: main name -> true
+let A = { alias: {}, first: {}, seen: {}, picked: {} };
+const visitName = {};               // visit token -> main name of that visit's character (this page load)
+function loadAliases() {
+  try {
+    const o = JSON.parse(localStorage.getItem(ALIAS_KEY) || "{}");
+    A = { alias: o.alias || {}, first: o.first || {}, seen: o.seen || {}, picked: o.picked || {} };
+  } catch (e) { /* no storage: masks are re-learned each visit */ }
+}
+function saveAliases() { try { localStorage.setItem(ALIAS_KEY, JSON.stringify(A)); } catch (e) { /* ignore */ } }
+function canon(name) {
+  for (let i = 0; i < 20 && A.alias[name] !== undefined; i++) name = A.alias[name];
+  return name;
+}
+// every name of the character whose main name this is, the main one first
+function namesOf(main) {
+  return [main, ...Object.keys(A.alias).filter(n => n !== main && canon(n) === main)];
+}
+// The character behind a reported name (and visit token).
+function identify(shown, sess) {
+  const name = canon(shown);
+  if (!name) return name;
+  const now = Date.now();
+  const stale = !A.seen[shown] || now - A.seen[shown] > 60e3;   // "last seen" needn't be exact to the second
+  A.seen[shown] = now;
+  if (!A.first[name]) A.first[name] = now;
+  if (stale) saveAliases();
+  if (!sess) return name;
+  const before = visitName[sess] !== undefined ? canon(visitName[sess]) : undefined;
+  if (before === undefined || before === name) { visitName[sess] = name; return name; }
+  return mergeNames(before, name, sess);
+}
+// Two names met in one visit: one character. A picked main name stays; otherwise the one known
+// longer (names from before masks were told apart all count as old: then more recorded moves).
+function mergeNames(a, b, sess) {
+  const fa = A.first[a] || Infinity, fb = A.first[b] || Infinity;
+  const keep = A.picked[a] ? a : A.picked[b] ? b :
+    fa !== fb ? (fa < fb ? a : b) : recordedSteps(a) >= recordedSteps(b) ? a : b;
+  const drop = keep === a ? b : a;
+  for (const [n, to] of Object.entries(A.alias)) if (to === drop) A.alias[n] = keep;
+  A.alias[drop] = keep;
+  delete A.picked[drop];
+  saveAliases();
+  visitName[sess] = keep;
+  absorb(drop, keep);
+  toast(`🎭 ${escapeHtml(drop)} and ${escapeHtml(keep)} are one character (a mask). Pick its main name in the 📡 panel.`);
+  return keep;
+}
+// The character called `drop` is called `keep` from now on (merged, or its main name changed).
+// Whichever was played more recently carries the live state (position, walk, ...).
+function absorb(drop, keep) {
+  const a = CH[drop], b = CH[keep];
+  delete CH[drop];
+  const aWins = !!a && (!b || a.seenAt >= b.seenAt);
+  if (aWins) {
+    if (b && b.W && b.W !== a.W) { clearInterval(b.W.timer); clearTimeout(b.W.pending); }
+    CH[keep] = Object.assign(a, { name: keep });
+  }
+  if (saved[drop] && (aWins || !saved[keep])) saved[keep] = saved[drop];
+  delete saved[drop];
+  for (const v of ["direct", "relay"]) if (pathChar[v] === drop) pathChar[v] = keep;
+  for (const t of Object.keys(visitName)) if (visitName[t] === drop) visitName[t] = keep;
+  if (focus === drop) { focus = keep; setCharacter(keep); }
+  if (C === a || C === b) C = charState(keep);
+  mergeNightCounts(drop, keep);
+  renameHistoryChar(drop, keep);
+  syncMarkers(); saveLive();
+}
+// your pick in the names list: permanent
+function pickMainName(main, name) {
+  if (main === name || canon(name) !== main) return;
+  for (const [n, to] of Object.entries(A.alias)) if (to === main) A.alias[n] = name;
+  delete A.alias[name];
+  A.alias[main] = name;
+  delete A.picked[main];
+  A.picked[name] = true;
+  saveAliases();
+  absorb(main, name);
+  render(); updateChip();
+  toast(`🎭 This character goes by <b>${escapeHtml(name)}</b> now.`);
+}
+// a mask you deleted in the game; if the name shows up again, it's grouped again by visit
+function forgetName(name) {
+  if (A.alias[name] === undefined) return;   // never the main name
+  delete A.alias[name]; delete A.first[name]; delete A.seen[name];
+  saveAliases();
 }
 function withChar(name, fn) {
   const prev = C;
@@ -134,6 +233,8 @@ function loadLive() {
     const o = JSON.parse(localStorage.getItem(LIVE_KEY) || "{}");
     saved = o.chars && typeof o.chars === "object" ? o.chars : {};
     if (o.here && !o.chars) saved[o.char || ""] = o.here;   // saved before there were several
+    // known before masks were told apart: older than any name seen from now on
+    for (const n of Object.keys(saved)) if (n && !A.first[n]) A.first[n] = 1;
     focus = typeof o.focus === "string" ? o.focus : (o.char || "");
     L.follow = o.follow !== false;
     L.window = clamp(parseInt(o.window, 10) || 5, 1, 5);
@@ -728,8 +829,10 @@ function buildLivePanel() {
   if (L.sending) {
     pill.className = "livepill on"; pill.textContent = "Sending";
     body.innerHTML = `<div class="livecard"><div class="livelabel">Linked device</div>
-      <div class="livesub">This browser's PbN tab sends its moves to the mapper on your linked device, and walks
-      that mapper's routes. Nothing is tracked here, so this tab can be closed.</div>
+      <div class="livedone">✓ Linked. You can close this tab.</div>
+      <div class="livesub">The PbN tab in this browser sends its moves to the mapper on your linked device by
+      itself, and walks that mapper's routes. This mapper isn't needed for that.</div>
+      <div class="livesub">To stop: open the mapper here again and press <b>Stop sending</b>.</div>
       <div class="histbtns"><button class="livebtn danger" id="relayUnpair">Stop sending</button></div></div>`;
     on("relayUnpair", "onclick", () => { post("unpair"); });
     return;
@@ -738,6 +841,8 @@ function buildLivePanel() {
   const anyAlive = Object.values(CH).some(alive);
   pill.className = "livepill" + (anyAlive ? " on" : "");
   pill.textContent = anyAlive ? "Connected" : "No MUSH tab";
+  if (L.namesOpen && C.name && namesOf(C.name).length > 1) return buildNamesView(body);
+  L.namesOpen = false;
 
   let h = "";
   if (bridgeOutdated()) {
@@ -751,9 +856,12 @@ function buildLivePanel() {
       const rm = roomOf(c);
       return `<button class="livechar${c.name === focus ? " on" : ""}" data-focus="${escapeAttr(c.name)}" title="Follow ${escapeAttr(c.name || "?")} on the map">
         <span class="livedot${alive(c) ? " on" : ""}"></span><b>${escapeHtml(c.name || "?")}</b>
-        <span class="livesub">${rm ? escapeHtml(rm.name) : "position unknown"}${c.via === "relay" ? " · linked device" : ""}${c.W ? " · 🚶" : ""}</span></button>`;
+        <span class="livesub">${c.shown ? "as " + escapeHtml(c.shown) + " · " : ""}${rm ? escapeHtml(rm.name) : "position unknown"}${c.via === "relay" ? " · linked device" : ""}${c.W ? " · 🚶" : ""}</span></button>`;
     }).join("") + `</div>`;
   }
+  const names = C.name ? namesOf(C.name) : [];
+  const namesLine = names.length > 1 ? `<button class="linkbtn livenames" id="liveNames" title="This character's names (masks): pick the main one, forget old ones">` +
+    `🎭 ${names.length} names${A.picked[C.name] ? "" : " · main name guessed, pick one"} ▸</button>` : "";
   h += `<div class="livecard">` + (r
     ? `<div class="livelabel">${C.name ? escapeHtml(C.name) + " is in" : "You are in"}</div>
        <div class="livehere">
@@ -763,7 +871,7 @@ function buildLivePanel() {
        <div class="livesub">${escapeHtml(roomLocation(r))}${C.sure ? "" : " · not confirmed by the game yet"}</div>`
     : `<div class="livelabel">${C.name ? escapeHtml(C.name) + " is in" : "You are in"}</div>
        <div class="livesub">Unknown. Move once in the game, or select the room and press <b>📍 I'm here</b>.</div>`) +
-    `</div>`;
+    namesLine + `</div>`;
   const W = C.W;
   if (W) {
     const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
@@ -815,6 +923,7 @@ function buildLivePanel() {
   body.innerHTML = h;
 
   body.querySelectorAll("[data-focus]").forEach(b => b.onclick = () => setFocus(b.dataset.focus));
+  on("liveNames", "onclick", () => { L.namesOpen = true; buildLivePanel(); });
   on("liveGoto", "onclick", () => gotoRoom(r.id));
   on("liveStop", "onclick", () => stopWalk("Stopped by you."));
   on("liveFollow", "onchange", e => { L.follow = e.target.checked; saveLive(); if (L.follow && r) followTo(r); });
@@ -835,6 +944,40 @@ function buildLivePanel() {
   on("liveGhostReset", "onclick", () => { resetDismissed(); buildLivePanel(); });
   wireStepper("liveWindow", v => { L.window = clamp(v, 1, 5); saveLive(); return L.window; });
   wireStepper("liveStall", v => { L.stallSec = clamp(v, 5, 300); saveLive(); return L.stallSec; });
+}
+// The focused character's names (masks), however many: the main one first, then the most recently
+// seen. A filter box from 8 names up; the list itself scrolls.
+const ago = t => {
+  if (!t) return "not seen yet";
+  const m = Math.round((Date.now() - t) / 60e3);
+  return m < 2 ? "just now" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+};
+function buildNamesView(body) {
+  const main = C.name;
+  const names = namesOf(main);
+  const rows = [main, ...names.slice(1).sort((a, b) => (A.seen[b] || 0) - (A.seen[a] || 0))];
+  body.innerHTML = `<div class="livecard">
+      <div class="livewalkhead"><div><div class="livelabel">Names of this character</div><b>${escapeHtml(main)}</b></div>
+        <button class="livebtn" id="namesBack">‹ Back</button></div>
+      <div class="livesub">◉ is the main name: positions, night counts and History are filed under it.
+        ${A.picked[main] ? "You picked it." : "<b>Guessed</b>: pick the right one."}
+        ✕ forgets a mask you no longer have; if it's used again, it's added again.</div>
+      ${names.length >= 8 ? `<input type="text" id="namesFilter" class="namesfilter" placeholder="Filter ${names.length} names…">` : ""}
+      <div class="namelist">` + rows.map(n => `
+        <div class="namerow${n === main ? " main" : ""}" data-name="${escapeAttr(n.toLowerCase())}">
+          <label title="${n === main ? "The main name" : "Make this the main name"}"><input type="radio" name="mainName" value="${escapeAttr(n)}"${n === main ? " checked" : ""}>
+            <span class="nm">${escapeHtml(n)}</span></label>
+          <span class="livesub">${ago(A.seen[n])}</span>
+          ${n === main ? `<span class="livesub nmtag">main</span>` : `<button class="liveicon" data-forget="${escapeAttr(n)}" title="Forget this name">✕</button>`}
+        </div>`).join("") + `</div></div>`;
+  document.getElementById("namesBack").onclick = () => { L.namesOpen = false; buildLivePanel(); };
+  const filter = document.getElementById("namesFilter");
+  if (filter) filter.oninput = () => {
+    const q = filter.value.trim().toLowerCase();
+    body.querySelectorAll(".namerow").forEach(el => { el.style.display = !q || el.dataset.name.includes(q) ? "" : "none"; });
+  };
+  body.querySelectorAll('input[name="mainName"]').forEach(el => el.onchange = () => { pickMainName(main, el.value); buildLivePanel(); });
+  body.querySelectorAll("[data-forget]").forEach(b => b.onclick = () => { forgetName(b.dataset.forget); buildLivePanel(); });
 }
 // Unverified auto-created rooms, all or just the last hour's: one undo step brings them back.
 function deleteAutoRooms(recentOnly) {
@@ -923,7 +1066,7 @@ async function relayPoll() {
 function onRelayItem(ev) {
   if (!ev || typeof ev !== "object") return;
   R.seenAt = Date.now();
-  const name = typeof ev.char === "string" && ev.char ? ev.char : pathChar.relay || "";
+  const name = typeof ev.char === "string" && ev.char ? identify(ev.char, ev.sess) : pathChar.relay || "";
   if (ev.kind === "pong") {
     notePath("relay", name);
     charState(name).clientAt = Date.now();
@@ -1047,6 +1190,9 @@ window.addEventListener("message", e => {
     if (L.sending !== !!m.sending) {
       L.sending = !!m.sending;
       if (L.sending && R.code) relayEnd("unlink");   // can't both feed another mapper and be fed
+      if (L.sending) toast(first ? "📡 This browser sends to your linked device. This tab isn't needed for that; close it any time."
+        : "✓ Linked to your other device. You can close this tab now: the PbN tab sends on its own.");
+      else if (!first) toast("📡 Stopped sending to the linked device.");
       render();
     }
     if (first) checkBridgeVersion();
@@ -1058,7 +1204,7 @@ window.addEventListener("message", e => {
   if (L.sending) return;   // this browser's game is followed by the mapper on the linked device
   if (m.type === "client") {
     // a pong without a name (journal not loaded yet) still says the tab is there
-    const name = m.char ? String(m.char) : pathChar.direct;
+    const name = m.char ? identify(String(m.char), m.sess) : pathChar.direct;
     if (name !== null) {
       if (m.char) notePath("direct", name);
       charState(name).clientAt = Date.now();
@@ -1073,10 +1219,11 @@ window.addEventListener("message", e => {
 // One game event, for the character it belongs to. Moving (or typing //goto) puts that character
 // in focus: it's the one being played right now.
 function handleEvent(e, via) {
-  const name = typeof e.char === "string" && e.char ? e.char : pathChar[via] || "";
+  const name = typeof e.char === "string" && e.char ? identify(e.char, e.sess) : pathChar[via] || "";
   notePath(via, name);
   withChar(name, () => {
     C.via = via; C.seenAt = C.clientAt = Date.now();
+    if (typeof e.char === "string" && e.char) C.shown = e.char !== C.name ? e.char : null;
     if (e.type === "move" || e.type === "goto" || !known().some(c => c.name === focus)) setFocus(name);
     if (e.type === "room") onRoom(e.room);
     else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
@@ -1130,6 +1277,7 @@ setInterval(() => { if (L.bridge) { const before = JSON.stringify(S.alts); syncM
 onIssuesChange(() => { updateChip(); refreshLivePanel(); });
 onHistoryChange(() => refreshLivePanel());
 window.addEventListener("hashchange", () => { updateChip(); if (automapOn()) toast("🤖 Auto-map on"); });
+loadAliases();
 loadLive();
 loadRelay();
 post("probe");

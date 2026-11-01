@@ -73,6 +73,14 @@ function tonight() {
 }
 loadNight();
 
+// live.js found two names to be one character (an Obfuscate mask): tonight's hauls add up
+export function mergeNightCounts(from, to) {
+  if (N.night !== nightId() || !N.by[from]) return;
+  const a = N.by[from], b = N.by[to] ||= { scavenge: [], harvest: [] };
+  for (const k of ["scavenge", "harvest"]) for (const id of a[k]) if (!b[k].includes(id)) b[k].push(id);
+  delete N.by[from];
+  saveNight();
+}
 export function tappedTonight(roomId) { const n = tonight(); return n.scavenge.includes(roomId) || n.harvest.includes(roomId); }
 export function gatherHtml() {
   const n = tonight();

@@ -79,9 +79,14 @@ export function setCharacter(name) {
   onChange();
 }
 export function currentCharacter() { return H.char; }
+// how many moves are recorded for this name (live.js: tells a character's real name from a mask)
+export function recordedSteps(name) {
+  const c = H.chars.find(ch => ch.name === name && !ch.merged);
+  return c ? H.events.reduce((n, e) => n + (e.c === c.i), 0) : 0;
+}
 
 function charIdx(name, color) {
-  let c = H.chars.find(ch => ch.name === name);
+  let c = H.chars.find(ch => ch.name === name && !ch.merged);
   if (!c) {
     c = { i: H.chars.length, name, color: color || COLORS[H.chars.length % COLORS.length], hidden: false };
     H.chars.push(c);
@@ -123,6 +128,33 @@ export function recordMove(roomId, name) {
   try { store("events", "readwrite").add(ev); } catch (e) { /* ignore */ }
   T = null;
   if (P.open) { buildBar(); }
+  onChange();
+}
+
+// live.js: the character called `from` is called `to` from now on (a mask merged into it, or its
+// main name changed). With no trail under `to` yet the trail is just renamed; otherwise `from`'s
+// steps move over to `to` and its entry stays behind, empty and hidden (indexes must not shift).
+export function renameHistoryChar(from, to) {
+  if (!H.ready || from === to) return;
+  const a = H.chars.find(ch => ch.name === from && !ch.merged);
+  if (!a) return;
+  const b = H.chars.find(ch => ch.name === to && !ch.merged);
+  if (!b) {
+    a.name = to; put("chars", a);
+  } else {
+    for (const e of H.events) if (e.c === a.i) e.c = b.i;
+    a.merged = true; a.hidden = true; put("chars", a);
+    try {   // stored steps carry the character's index: write them all again
+      const st = store("events", "readwrite");
+      st.clear();
+      for (const e of H.events) st.add(e);
+    } catch (e) { /* quota etc.: right in memory, until the next load */ }
+    H.last = {};
+    for (const e of H.events) H.last[e.c] = H.rooms[e.r] && H.rooms[e.r].id;
+  }
+  if (H.char === from) H.char = to;
+  T = null;
+  if (P.open) buildBar();
   onChange();
 }
 
@@ -273,7 +305,7 @@ function buildBar() {
       <button id="hbHeat" class="${P.heat ? "active" : ""}" title="Heatmap: tint rooms by how often they were visited, up to this moment">🔥</button>
       <button class="iconbtn" id="hbClose" title="Close history">✕</button>
     </div>
-    <div class="hb-chars">${H.chars.map(c => `
+    <div class="hb-chars">${H.chars.filter(c => !c.merged).map(c => `
       <span class="hb-char${c.hidden ? " off" : ""}" data-c="${c.i}">
         <input type="color" value="${escapeAttr(c.color)}" title="Colour">
         <span class="hb-name">${escapeHtml(c.name)}</span>
