@@ -168,7 +168,7 @@ export function renderInspector() {
   }
   h += `<div class="insec"><span class="seclabel">Traits</span><div class="trait-chips" id="f_traits"></div></div>`;
   h += `<div class="insec"><span class="seclabel">Route flags</span><div class="trait-chips" id="f_flags">` +
-    ROOM_FLAGS.map(f => `<button class="trait-chip${r[f.key] ? " sel" : ""}" data-flag="${f.key}" title="${f.tip}">${f.icon} ${f.label}</button>`).join("") +
+    ROOM_FLAGS.map(f => `<button class="trait-chip${r[f.key] === true ? " sel" : ""}" data-flag="${f.key}" title="${f.tip}">${f.icon} ${f.label}</button>`).join("") +
     `</div></div>`;
 
   h += `<div class="insec">
@@ -252,7 +252,7 @@ export function renderInspector() {
   }
   document.querySelectorAll("#f_flags [data-flag]").forEach(b => b.onclick = () => {
     const f = b.dataset.flag;
-    if (r[f]) delete r[f]; else r[f] = true;
+    r[f] = r[f] !== true;   // off stays recorded as off, so auto-map doesn't switch it back on
     commit(); render();
   });
   // text fields: live autosave on input, single undo step committed on blur/change

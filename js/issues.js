@@ -70,7 +70,14 @@ export function checkRoom(r, snap) {
     for (const d of DIRS) {
       const mapT = r.exits[d] ? S.map.rooms[r.exits[d]] : null;
       const g = exits[d] || null;
-      if (mapT && g) {
+      // auto-map knows (by the game's keys) which room this exit really leads to
+      const real = snap.exitTo && snap.exitTo[d] ? S.map.rooms[snap.exitTo[d]] : null;
+      if (mapT && g && real) {
+        if (real.id !== mapT.id) put({ type: "other", roomId: r.id, dir: d, mapTo: mapT.name, game: real.name, toId: real.id });
+        const fly = !!(r.exitFly && r.exitFly[d]);
+        if (g.aerial && !fly) put({ type: "fly", roomId: r.id, dir: d, mapTo: mapT.name });
+        if (!g.aerial && fly) put({ type: "nofly", roomId: r.id, dir: d, mapTo: mapT.name });
+      } else if (mapT && g) {
         if (g.name && g.name !== mapT.name) put({ type: "other", roomId: r.id, dir: d, mapTo: mapT.name, game: g.name });
         const fly = !!(r.exitFly && r.exitFly[d]);
         if (g.aerial && !fly) put({ type: "fly", roomId: r.id, dir: d, mapTo: mapT.name });
@@ -129,7 +136,7 @@ function describe(e, room) {
 function fixFor(e, room) {
   switch (e.type) {
     case "other": case "arrived": {
-      const to = uniqueNamed(e.game);
+      const to = e.toId && S.map.rooms[e.toId] || uniqueNamed(e.game);
       return to ? [`Relink to ${to.name}`, () => { room.exits[e.dir] = to.id; }] : null;
     }
     case "fly":   return ["Mark ✈", () => setExitFly(room.id, e.dir, true)];

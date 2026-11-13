@@ -104,7 +104,8 @@ export function normalize() {
     if (!Array.isArray(r.traits)) r.traits = [];
     r.traits = r.traits.filter(id => traitIds.has(id));
     // Route flags, any map: haven / lockable (both "may be locked" to the route finder), sewer.
-    for (const f of ["haven", "lockable", "sewer"]) if (r[f] !== true) delete r[f];
+    // false = switched off by hand (auto-map leaves those alone); unset = never decided
+    for (const f of ["haven", "lockable", "sewer"]) if (r[f] !== true && r[f] !== false) delete r[f];
     // Game data, only ever written by auto-map (live.js) and never shown: gk = the game's "x,y,z"
     // for this room (one room per key), game = {tag, exposure, features, indoor}, hood = neighbourhood.
     if (typeof r.gk !== "string" || !/^-?\d+,-?\d+,-?\d+$/.test(r.gk) || gkSeen.has(r.gk)) delete r.gk;

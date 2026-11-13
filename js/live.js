@@ -389,6 +389,16 @@ function onRoom(snap) {
     if (best) C.sure = true;
   }
   if (!C.sure) return;   // not sure where this is: don't write anything onto the map from it
+  if (automapOn() && snap.key && !C.seenName) {
+    // sure, and the names agree: this room is that game key from now on
+    const r = hereRoom();
+    if (r && !r.gk && r.name === snap.name && !roomByKey(snap.key)) { r.gk = snap.key; commit(); }
+  }
+  if (automapOn() && snap.game) {
+    // where the game's exits lead, as rooms on the map: exact checks instead of comparing names
+    snap.exitTo = {};
+    for (const [d, k] of Object.entries(exitKeys(snap.game))) { const t = roomByKey(k); if (t) snap.exitTo[d] = t.id; }
+  }
   if (automapOn()) autoFill(hereRoom(), snap);
   checkRoom(hereRoom(), snap);   // issues.js: where map and game disagree
 }
@@ -438,6 +448,39 @@ function noteGameNight(day) {
   if (m) gameNight = { id: m[1], at: Date.now() };
 }
 export function liveNight() { return gameNight && Date.now() - gameNight.at < 3 * 3600e3 ? gameNight.id : null; }
+const keyXYZ = k => { const m = /^(-?\d+),(-?\d+),(-?\d+)$/.exec(k || ""); return m ? [+m[1], +m[2], +m[3]] : null; };
+// The map cell for game key `to`, counted from room `from` (whose key is `fromKey`): the game's
+// offset, with y flipped (the game's y grows north, the map's south).
+function cellFor(from, fromKey, to) {
+  const a = keyXYZ(fromKey), b = keyXYZ(to);
+  if (!a || !b) return null;
+  return { x: from.x + (b[0] - a[0]), y: from.y - (b[1] - a[1]), z: from.z + (b[2] - a[2]) };
+}
+// Exit ids → game keys, learned by walking through them (auto-map only). The id is on the exit,
+// never on the room it leads to, so this is the only way to know where an exit goes before going.
+// Per browser: nothing in the map, and quickly learned again.
+const IDS_KEY = "mushMapEditor.gameIds.v1";
+let IDS = {};
+try { IDS = JSON.parse(localStorage.getItem(IDS_KEY) || "{}") || {}; } catch (e) { /* relearned */ }
+function learnExit(from, dir, toKey) {
+  const e = (from.exits || []).find(x => DIR_KEY[x.dir] === dir);
+  if (!e || e.tid == null || IDS[e.tid] === toKey) return;
+  IDS[e.tid] = toKey;
+  try { localStorage.setItem(IDS_KEY, JSON.stringify(IDS)); } catch (err) { /* ignore */ }
+}
+// where each of the game room's exits leads, as game keys, when known: learned ids first, then
+// for walkable exits the room next door on the grid
+function exitKeys(g) {
+  const out = {};
+  for (const e of g.exits || []) {
+    const d = DIR_KEY[e.dir];
+    if (!d) continue;
+    const nb = !e.fly && (g.nb || []).find(n => DIR_KEY[n.dir] === d);
+    const k = IDS[e.tid] || (nb && nb.key) || null;
+    if (k) out[d] = k;
+  }
+  return out;
+}
 // Who's playing, from the game: its id, real name and the mask's name. The real name is the
 // character's main name unless you picked another; a mask joins that character for good.
 function onGameChar(g, sess) {
@@ -483,6 +526,42 @@ let autoWarned = false;   // autoStep explained why it stopped: don't bury that 
 function autoStep(from, dir, name) {
   const took = C.snap && C.snap.name === from.name && C.snap.exits ? C.snap.exits[dir] : null;
   const fly = !!(took && took.aerial);
+  // The game's data for where this move went (it arrives before the chat line, see onGameRoom) and
+  // for where it started: the new room's place follows from the two keys, and a room the map has
+  // under that key is that room, wherever it is (another space included).
+  const dest = C.pendingGame && norm(C.pendingGame.g.name) === norm(name) ? C.pendingGame.g : null;
+  const orig = C.game && from.gk && C.game.key === from.gk ? C.game : null;
+  if (dest && dest.key) {
+    if (orig) learnExit(orig, dir, dest.key);
+    const known = roomByKey(dest.key);
+    if (known) {
+      linkBoth(from, dir, known, fly);
+      commit();
+      return known;
+    }
+    const at = orig && cellFor(from, orig.key, dest.key);
+    if (at) {
+      if (at.x < 0 || at.x >= GRID_N || at.y < 0 || at.y >= GRID_N) return null;
+      const cell = roomAtCell(at.z, at.x, at.y, spaceOf(from));
+      if (cell) {
+        if (cell.gk || cell.name !== name) {
+          toast(`🤖 ${who()}Auto-map: where “${escapeHtml(name)}” belongs, your map has “${escapeHtml(cell.name)}”. Left alone; maybe it belongs in a space.`);
+          autoWarned = true;
+          return null;
+        }
+        cell.gk = dest.key;
+        linkBoth(from, dir, cell, fly);
+        commit();
+        return cell;
+      }
+      const r = createRoom(at.z, at.x, at.y, name, spaceOf(from));
+      r.auto = true; r.autoAt = Date.now(); r.gk = dest.key;
+      linkBoth(from, dir, r, fly);
+      commit();
+      return r;
+    }
+  }
+  // no game data (an older bridge), or the room you came from has no key yet: by direction, as before
   // already mapped the other way round (e.g. back out of a space): link it, build nothing
   const back = linkedInto(from, dir, name);
   if (back) {
@@ -528,8 +607,38 @@ function autoFill(r, snap) {
   }
   if (!r.description && snap.description) { r.description = snap.description; changed = true; }
   if (!r.imageUrl && snap.image) { r.imageUrl = snap.image; changed = true; }
+  const g = snap.game && r.gk === snap.key ? snap.game : null;
+  if (g) {
+    // game details, kept for later (never shown); the neighbourhood by slug, its name etc. once per map
+    if (!r.game) { r.game = { tag: g.tag, exposure: g.exposure, features: g.features || [], indoor: !!g.indoor }; changed = true; }
+    if (g.hood && g.hood.slug) {
+      if (!r.hood) { r.hood = g.hood.slug; changed = true; }
+      if (!(S.map.hoods && S.map.hoods[g.hood.slug])) {
+        (S.map.hoods ||= {})[g.hood.slug] = { name: g.hood.name || g.hood.slug, sect: g.hood.sect || null, notes: g.hood.notes || "" };
+        changed = true;
+      }
+    }
+    // route flags, only where you haven't set them (true or false) yourself
+    if (g.haven && r.haven === undefined) { r.haven = true; changed = true; }
+    if (g.havenLocked && r.lockable === undefined) { r.lockable = true; changed = true; }
+    if (g.sewer && r.sewer === undefined) { r.sewer = true; changed = true; }
+    // a locked exit means the room behind it locks
+    const keys = exitKeys(g);
+    for (const e of g.exits || []) {
+      const t = e.locked && roomByKey(keys[DIR_KEY[e.dir]]);
+      if (t && t.lockable === undefined) { t.lockable = true; changed = true; }
+    }
+  }
+  const gKeys = g ? exitKeys(g) : {};
   for (const [d, ex] of Object.entries(snap.exits || {})) {
     if (!ex || r.exits[d]) continue;
+    // the game says where it leads, and that room is on the map: exact
+    const byKey = roomByKey(gKeys[d]);
+    if (byKey) {
+      linkBoth(r, d, byKey, !!ex.aerial);
+      changed = true;
+      continue;
+    }
     // flight exits never name where they go, so they can't be matched to a mapped room
     let n = ex.name ? neighbourCell(r, d) : null;
     if (n && n.name !== ex.name) n = null;
@@ -547,6 +656,16 @@ function autoFill(r, snap) {
   if (changed) { commit(); render(); }
   // ghost tiles for mini-map neighbours on empty cells (ghosts.js; per browser, not map data)
   const list = [];
+  if (g) {
+    // placed by the game's offset; a neighbour the map has under its key needs no ghost
+    for (const n of g.nb || []) {
+      if (!n.name || roomByKey(n.key)) continue;
+      const at = cellFor(r, r.gk, n.key);
+      if (at && at.x >= 0 && at.x < GRID_N && at.y >= 0 && at.y < GRID_N) list.push({ space: spaceOf(r), z: at.z, x: at.x, y: at.y, name: n.name });
+    }
+    if (addGhosts(list)) render();
+    return;
+  }
   for (const d of COMPASS) {
     const name = snap.grid && snap.grid[d];
     if (!name || !inGrid(r, d)) continue;
@@ -558,6 +677,8 @@ function autoFill(r, snap) {
 
 function onMove(word, name) {
   const dir = DIR_OF[(word || "").toLowerCase()] || null;
+  // auto-map: the exit just taken leads to the room the game sent before this line
+  if (automapOn() && dir && C.game && C.pendingGame && C.pendingGame.g.key) learnExit(C.game, dir, C.pendingGame.g.key);
   if (dir && positionSure()) noteArrived(hereRoom(), dir, name);
   C.riding = null;
   const W = C.W;
@@ -955,6 +1076,13 @@ function buildLivePanel() {
     : `<div class="livelabel">${C.name ? escapeHtml(C.name) + " is in" : "You are in"}</div>
        <div class="livesub">Unknown. Move once in the game, or select the room and press <b>📍 I'm here</b>.</div>`) +
     namesLine + `</div>`;
+  const hood = automapOn() && C.game && C.game.hood;
+  if (hood) {
+    h += `<div class="livecard" title="${escapeAttr(hood.notes || "")}"><div class="livelabel">Neighbourhood</div>
+      <b>${escapeHtml(hood.name || hood.slug)}</b><div class="livesub">` +
+      [hood.sect, hood.police != null ? `police ${hood.police}` : null, hood.heat != null ? `heat ${hood.heat}` : null]
+        .filter(Boolean).map(escapeHtml).join(" · ") + `</div></div>`;
+  }
   const W = C.W;
   if (W) {
     const dest = S.map.rooms[W.steps[W.steps.length - 1].toId];
