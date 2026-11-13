@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.7.3
+// @version      1.7.4
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -59,7 +59,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.3';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.4';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -85,9 +85,15 @@
     // by origin, not e.source: in Firefox the userscript's `window` is a wrapper, never the page's own
     window.addEventListener('message', e => {
       if (e.origin !== location.origin || !e.data || e.data.mmTap !== 1) return;
-      const kind = e.data.ev === 'char' ? 'char' : 'room';
-      tapped[kind] = e.data.d;
-      if (tapped.on) tapped.on(kind, e.data.d);
+      let kind = e.data.ev === 'room' ? 'room' : 'char', d = e.data.d;
+      if (e.data.ev === 'names') {
+        // a mask put on or dropped: same character, other names
+        const c = tapped.char || {};
+        if (c.name && c.name !== d.name) return;   // not the one the socket said is playing
+        d = { id: c.id, name: d.name, alias: d.alias, mask: d.mask };
+      }
+      tapped[kind] = d;
+      if (tapped.on) tapped.on(kind, d);
     });
   }
   // Runs in the page (toString'd above): must not use anything from outside itself.
@@ -109,7 +115,8 @@
       };
     }
     const want = t => typeof t === 'string' &&
-      (t.indexOf('"roomUpdate"') >= 0 || t.indexOf('"roomInfo"') >= 0 || t.indexOf('"characterInfo"') >= 0);
+      (t.indexOf('"roomUpdate"') >= 0 || t.indexOf('"roomInfo"') >= 0 || t.indexOf('"characterInfo"') >= 0 ||
+       t.indexOf('"mention-identities"') >= 0);
     // one engine.io packet: "42[event, data]" (a namespace may sit between "42" and the "[")
     function packet(p) {
       if (p.charAt(0) !== '4' || p.charAt(1) !== '2') return;
@@ -120,6 +127,8 @@
       if (!Array.isArray(a) || !a[1] || typeof a[1] !== 'object') return;
       if (a[0] === 'roomUpdate' || a[0] === 'roomInfo') send('room', room(a[1]));
       else if (a[0] === 'characterInfo') send('char', { id: a[1].character_id, name: a[1].name, alias: a[1].active_alias || null });
+      else if (a[0] === 'mention-identities' && a[1].realName)
+        send('names', { name: a[1].realName, alias: a[1].activeAlias || null, mask: a[1].personaName || null });
     }
     // polling responses carry several packets, separated by \x1e
     const text = t => { if (want(t)) t.split('\x1e').forEach(packet); };
@@ -483,7 +492,7 @@
     const pushTap = (kind, d) => { if (onPlay && isActive()) push({ kind: kind === 'char' ? 'gchar' : 'groom', g: d }); };
     let tapId = null;   // the character the game last said is playing
     function onTap(kind, d) {
-      if (kind === 'char' && d && d.id !== tapId) {
+      if (kind === 'char' && d && d.id != null && d.id !== tapId) {
         if (tapId !== null) sess = Math.random().toString(36).slice(2);   // another character: a new visit
         tapId = d.id;
       }

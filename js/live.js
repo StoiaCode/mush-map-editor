@@ -522,7 +522,8 @@ function onGameChar(g, sess) {
   const main = canon(real);
   if (main !== real && !A.picked[main]) renameMain(main, real);   // the real name takes over a guessed one
   const mine = canon(real);
-  if (g.alias && canon(g.alias) !== mine) mergeInto(canon(g.alias), mine);
+  // its alias and the Obfuscate mask it wears (mention-identities): other names of the same one
+  for (const n of [g.alias, g.mask]) if (typeof n === "string" && n && canon(n) !== mine) mergeInto(canon(n), mine);
   if (sess) visitName[sess] = mine;
   saveAliases();
 }
