@@ -556,6 +556,8 @@ function autoStep(from, dir, name) {
       }
       const r = createRoom(at.z, at.x, at.y, name, spaceOf(from));
       r.auto = true; r.autoAt = Date.now(); r.gk = dest.key;
+      const via = (orig.exits || []).find(x => DIR_KEY[x.dir] === dir);
+      if (via && via.broken) r.haven = true;   // a broken door only ever leads into a haven
       linkBoth(from, dir, r, fly);
       commit();
       return r;
@@ -622,11 +624,12 @@ function autoFill(r, snap) {
     if (g.haven && r.haven === undefined) { r.haven = true; changed = true; }
     if (g.havenLocked && r.lockable === undefined) { r.lockable = true; changed = true; }
     if (g.sewer && r.sewer === undefined) { r.sewer = true; changed = true; }
-    // a locked exit means the room behind it locks
+    // a locked exit means the room behind it locks; a broken one only ever leads into a haven
     const keys = exitKeys(g);
     for (const e of g.exits || []) {
-      const t = e.locked && roomByKey(keys[DIR_KEY[e.dir]]);
-      if (t && t.lockable === undefined) { t.lockable = true; changed = true; }
+      const t = (e.locked || e.broken) && roomByKey(keys[DIR_KEY[e.dir]]);
+      if (t && e.locked && t.lockable === undefined) { t.lockable = true; changed = true; }
+      if (t && e.broken && t.haven === undefined) { t.haven = true; changed = true; }
     }
   }
   const gKeys = g ? exitKeys(g) : {};

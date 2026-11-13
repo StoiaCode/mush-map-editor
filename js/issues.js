@@ -63,7 +63,9 @@ export function checkRoom(r, snap) {
   if (!r || !snap) return;
   // everything about this room is decided fresh, except a walk's "arrived" findings
   for (const [k, e] of Object.entries(I.items)) if (e.roomId === r.id && e.type !== "arrived") delete I.items[k];
-  if (r.name !== snap.name) {
+  // a haven's owner names and describes it as they like: those differences are no mistake
+  const haven = r.haven === true;
+  if (r.name !== snap.name && !haven) {
     put({ type: "name", roomId: r.id, game: snap.name });
   } else {
     const exits = snap.exits || {};
@@ -78,7 +80,7 @@ export function checkRoom(r, snap) {
         if (g.aerial && !fly) put({ type: "fly", roomId: r.id, dir: d, mapTo: mapT.name });
         if (!g.aerial && fly) put({ type: "nofly", roomId: r.id, dir: d, mapTo: mapT.name });
       } else if (mapT && g) {
-        if (g.name && g.name !== mapT.name) put({ type: "other", roomId: r.id, dir: d, mapTo: mapT.name, game: g.name });
+        if (g.name && g.name !== mapT.name && mapT.haven !== true) put({ type: "other", roomId: r.id, dir: d, mapTo: mapT.name, game: g.name });
         const fly = !!(r.exitFly && r.exitFly[d]);
         if (g.aerial && !fly) put({ type: "fly", roomId: r.id, dir: d, mapTo: mapT.name });
         if (!g.aerial && fly) put({ type: "nofly", roomId: r.id, dir: d, mapTo: mapT.name });
@@ -92,7 +94,7 @@ export function checkRoom(r, snap) {
       const t = r.exits[e.dir] && S.map.rooms[r.exits[e.dir]];
       if (t && t.name === e.game) delete I.items[k];
     }
-    if (r.description && snap.description && !same(r.description, snap.description))
+    if (!haven && r.description && snap.description && !same(r.description, snap.description))
       put({ type: "desc", roomId: r.id, game: snap.description.slice(0, 2000) });
     if (r.imageUrl && snap.image && r.imageUrl !== snap.image)
       put({ type: "image", roomId: r.id, game: snap.image });
@@ -104,7 +106,7 @@ export function checkRoom(r, snap) {
 // exit leads.
 export function noteArrived(from, dir, gameName) {
   const t = from && from.exits[dir] && S.map.rooms[from.exits[dir]];
-  if (!t || t.name === gameName) return;
+  if (!t || t.name === gameName || t.haven === true) return;   // a haven's name is its owner's choice
   put({ type: "arrived", roomId: from.id, dir, mapTo: t.name, game: gameName });
   save(); onChange();
 }

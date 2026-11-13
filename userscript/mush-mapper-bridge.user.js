@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.7.1
+// @version      1.7.2
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -58,7 +58,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.1';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.2';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -101,7 +101,7 @@
         indoor: !!d.indoor, tag: d.primaryTag || null, exposure: d.exposureTier || null,
         features: Array.isArray(d.features) ? d.features : [],
         haven: !!d.isHaven, havenLocked: !!d.havenIsLocked, sewer: !!(d.navigation && d.navigation.inSewer),
-        exits: (d.exits || []).map(e => ({ dir: e.direction, tid: e.targetRoomId, fly: e.flightRequired || 0, locked: !!e.isLocked })),
+        exits: (d.exits || []).map(e => ({ dir: e.direction, tid: e.targetRoomId, fly: e.flightRequired || 0, locked: !!e.isLocked, broken: !!e.broken })),
         nb: (d.neighbors || []).map(n => ({ dir: n.direction, name: n.name, key: n.key })),
         hood: hood(d.neighborhood),
         day: d.gameTime ? d.gameTime.gameDayKey : null,
