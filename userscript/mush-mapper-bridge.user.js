@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.6.7
+// @version      1.7.0
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
 // @match        http://127.0.0.1/*
 // @match        https://philadelphiabynight.net/*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
@@ -42,6 +42,8 @@
 //                every client event also carries char: the name the journal shows (an Obfuscate
 //                mask shows the mask's name), and sess: a token per visit to /play. Switching
 //                characters always leaves /play, so names seen in one visit are one character.
+//                {seq, kind:'groom', g}          the game's own data for the room you're in (see pageTap)
+//                {seq, kind:'gchar', g}          the game's data for who's playing: {id, name, alias}
 //   mm_reply   {seq, lines, char}            mapper → client: shown as a local [MAPPER] chat line
 //   mm_relay   {code, api} | null            this browser's PbN tab feeds a mapper on ANOTHER device
 //                                            through the site's relay (server/app.py), instead of a
@@ -56,12 +58,90 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.7';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.0';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
-  if (document.querySelector('meta[name="mush-mapper"]')) mapperRole();
-  else if (location.hostname === 'philadelphiabynight.net') clientRole();
+  // Runs at document-start, so the socket can be listened to from its first message; everything
+  // else waits for the page as before. The mapper page is only known by its <meta> once parsed.
+  const whenReady = fn => document.readyState === 'loading'
+    ? document.addEventListener('DOMContentLoaded', fn, { once: true }) : fn();
+  const tapped = { room: null, char: null, on: null };   // the latest of each; clientRole takes them live
+  if (location.hostname === 'philadelphiabynight.net') { tapSocket(); whenReady(clientRole); }
+  else whenReady(() => { if (document.querySelector('meta[name="mush-mapper"]')) mapperRole(); });
+
+  // --------------------------------------------------------------------------
+  // The game's socket (PbN client)
+  // --------------------------------------------------------------------------
+  // The client gets everything over socket.io: first by HTTP polling (characterInfo arrives that
+  // way), then over a WebSocket. A small script in the page itself listens along (it never sends
+  // anything) and hands over only the few fields the mapper uses, nothing else of the stream.
+  function tapSocket() {
+    const s = document.createElement('script');
+    s.textContent = '(' + pageTap.toString() + ')();';
+    (document.head || document.documentElement).appendChild(s);
+    s.remove();
+    window.addEventListener('message', e => {
+      if (e.source !== window || !e.data || e.data.mmTap !== 1) return;
+      const kind = e.data.ev === 'char' ? 'char' : 'room';
+      tapped[kind] = e.data.d;
+      if (tapped.on) tapped.on(kind, e.data.d);
+    });
+  }
+  // Runs in the page (toString'd above): must not use anything from outside itself.
+  function pageTap() {
+    const send = (ev, d) => window.postMessage({ mmTap: 1, ev, d }, location.origin);
+    const hood = h => h ? { slug: h.slug, name: h.name, sect: h.sect, notes: h.notes,
+      police: h.police_presence, heat: h.masquerade_heat } : null;
+    function room(d) {
+      return {
+        key: d.key, x: d.coord_x, y: d.coord_y, z: d.coord_z, name: d.name,
+        description: d.description || '', image: d.image || '',
+        indoor: !!d.indoor, tag: d.primaryTag || null, exposure: d.exposureTier || null,
+        features: Array.isArray(d.features) ? d.features : [],
+        haven: !!d.isHaven, havenLocked: !!d.havenIsLocked, sewer: !!(d.navigation && d.navigation.inSewer),
+        exits: (d.exits || []).map(e => ({ dir: e.direction, tid: e.targetRoomId, fly: e.flightRequired || 0, locked: !!e.isLocked })),
+        nb: (d.neighbors || []).map(n => ({ dir: n.direction, name: n.name, key: n.key })),
+        hood: hood(d.neighborhood),
+        day: d.gameTime ? d.gameTime.gameDayKey : null,
+      };
+    }
+    const want = t => typeof t === 'string' &&
+      (t.indexOf('"roomUpdate"') >= 0 || t.indexOf('"roomInfo"') >= 0 || t.indexOf('"characterInfo"') >= 0);
+    // one engine.io packet: "42[event, data]" (a namespace may sit between "42" and the "[")
+    function packet(p) {
+      if (p.charAt(0) !== '4' || p.charAt(1) !== '2') return;
+      const i = p.indexOf('[');
+      if (i < 0) return;
+      let a;
+      try { a = JSON.parse(p.slice(i)); } catch (e) { return; }
+      if (!Array.isArray(a) || !a[1] || typeof a[1] !== 'object') return;
+      if (a[0] === 'roomUpdate' || a[0] === 'roomInfo') send('room', room(a[1]));
+      else if (a[0] === 'characterInfo') send('char', { id: a[1].character_id, name: a[1].name, alias: a[1].active_alias || null });
+    }
+    // polling responses carry several packets, separated by \x1e
+    const text = t => { if (want(t)) t.split('\x1e').forEach(packet); };
+    const isIo = u => /\/socket\.io\//.test(String(u));
+    const WS = window.WebSocket;
+    window.WebSocket = new Proxy(WS, {
+      construct(T, args) {
+        const ws = Reflect.construct(T, args);
+        if (isIo(args[0])) ws.addEventListener('message', e => text(e.data));
+        return ws;
+      },
+    });
+    const open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (isIo(url)) this.addEventListener('load', () => { try { text(this.responseText); } catch (e) { /* binary */ } });
+      return open.apply(this, arguments);
+    };
+    const f = window.fetch;
+    window.fetch = function (input) {
+      const p = f.apply(this, arguments);
+      if (isIo(input && input.url || input)) p.then(r => r.clone().text()).then(text).catch(() => {});
+      return p;
+    };
+  }
 
   // --------------------------------------------------------------------------
   // Mapper page
@@ -107,6 +187,7 @@
         else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char, sess });
         else if (ev.kind === 'train') toPage('train', { text: ev.text, char, sess });
         else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char, sess });
+        else if (ev.kind === 'groom' || ev.kind === 'gchar') toPage(ev.kind, { g: ev.g, char, sess });
         else toPage('move', { dir: ev.dir, name: ev.name, char, sess });
       }
     });
@@ -392,8 +473,16 @@
     function mapperPinged() {
       const fresh = Date.now() - mapperSeen > 15000;
       mapperSeen = Date.now();
-      if (fresh && onPlay && isActive()) reportRoom(null);
+      if (fresh && onPlay && isActive()) { reportRoom(null); pushTapped(); }
     }
+    // the game's own data (tapSocket): live while playing, and the latest again for a new visit
+    // or a mapper that just turned up
+    const pushTap = (kind, d) => { if (onPlay && isActive()) push({ kind: kind === 'char' ? 'gchar' : 'groom', g: d }); };
+    function pushTapped() {
+      if (tapped.char) pushTap('char', tapped.char);
+      if (tapped.room) pushTap('room', tapped.room);
+    }
+    tapped.on = pushTap;
     GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
       mapperPinged();
       if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName(), sess });
@@ -541,6 +630,7 @@
       onPlay = true;
       sess = Math.random().toString(36).slice(2);   // a new visit: possibly another character
       claim();
+      pushTapped();
       if (mount()) return;
       waiter = new MutationObserver(() => { if (mount()) { waiter.disconnect(); waiter = null; } });
       waiter.observe(document.body, { childList: true, subtree: true });

@@ -1074,6 +1074,7 @@ function onRelayItem(ev) {
     updateChip(); refreshLivePanel();
     return;
   }
+  if (ev.kind === "groom" || ev.kind === "gchar") return logGame({ type: ev.kind, g: ev.g }, "relay");
   if (["move", "room", "sys", "train", "gather", "goto"].includes(ev.kind))
     handleEvent({ ...ev, type: ev.kind, char: name }, "relay");
 }
@@ -1215,11 +1216,23 @@ window.addEventListener("message", e => {
     queueGameEvent(m);
   } else if (m.type === "goto") {
     handleEvent(m, "direct");
+  } else if (m.type === "groom" || m.type === "gchar") {
+    logGame(m, "direct");
   }
 });
+// The game's own room and character data (bridge 1.7). Only logged for now, to check what it says
+// against what the chat says; nothing uses it yet.
+let lastMoveLog = null;
+function logGame(m, via) {
+  const g = m.g || {};
+  if (m.type === "gchar") return console.debug(`[MM ${via}] character`, g);
+  const since = lastMoveLog ? ` ${Date.now() - lastMoveLog.t}ms after "${lastMoveLog.dir}"` : "";
+  console.debug(`[MM ${via}] room ${g.key} "${g.name}"${since}`, g);
+}
 // One game event, for the character it belongs to. Moving (or typing //goto) puts that character
 // in focus: it's the one being played right now.
 function handleEvent(e, via) {
+  if (e.type === "move") { lastMoveLog = { t: Date.now(), dir: e.dir }; console.debug(`[MM ${via}] move ${e.dir} to "${e.name}"`); }
   const name = typeof e.char === "string" && e.char ? identify(e.char, e.sess) : pathChar[via] || "";
   notePath(via, name);
   withChar(name, () => {
