@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.7.0
+// @version      1.7.1
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -58,7 +58,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.0';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.1';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -81,8 +81,9 @@
     s.textContent = '(' + pageTap.toString() + ')();';
     (document.head || document.documentElement).appendChild(s);
     s.remove();
+    // by origin, not e.source: in Firefox the userscript's `window` is a wrapper, never the page's own
     window.addEventListener('message', e => {
-      if (e.source !== window || !e.data || e.data.mmTap !== 1) return;
+      if (e.origin !== location.origin || !e.data || e.data.mmTap !== 1) return;
       const kind = e.data.ev === 'char' ? 'char' : 'room';
       tapped[kind] = e.data.d;
       if (tapped.on) tapped.on(kind, e.data.d);

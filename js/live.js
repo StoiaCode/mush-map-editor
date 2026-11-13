@@ -91,6 +91,8 @@ function charState(name) {
     seenAt: 0,          // last game event this session
     via: "direct",      // "direct" (this browser's bridge) or "relay" (another device)
     shown: null,        // the name the journal shows right now, when it's a mask
+    gameSeen: false,    // the game's own room data arrives for this one (bridge 1.7): the side panel isn't read
+    pendingGame: null,  // {g, timer}: a game room held until its chat line ("You move...") has been handled
   };
 }
 
@@ -171,17 +173,32 @@ function absorb(drop, keep) {
   renameHistoryChar(drop, keep);
   syncMarkers(); saveLive();
 }
-// your pick in the names list: permanent
-function pickMainName(main, name) {
+// The character called `main` goes by `name` (one of its names) from now on.
+function renameMain(main, name) {
   if (main === name || canon(name) !== main) return;
   for (const [n, to] of Object.entries(A.alias)) if (to === main) A.alias[n] = name;
   delete A.alias[name];
   A.alias[main] = name;
-  delete A.picked[main];
-  A.picked[name] = true;
+  if (A.picked[main]) { delete A.picked[main]; A.picked[name] = true; }
   saveAliases();
   absorb(main, name);
   render(); updateChip();
+}
+// The game says `drop` (a mask) is the character called `keep`.
+function mergeInto(drop, keep) {
+  if (drop === keep) return;
+  for (const [n, to] of Object.entries(A.alias)) if (to === drop) A.alias[n] = keep;
+  A.alias[drop] = keep;
+  delete A.picked[drop];
+  saveAliases();
+  absorb(drop, keep);
+}
+// your pick in the names list: permanent
+function pickMainName(main, name) {
+  if (main === name || canon(name) !== main) return;
+  renameMain(main, name);
+  A.picked[name] = true;
+  saveAliases();
   toast(`🎭 This character goes by <b>${escapeHtml(name)}</b> now.`);
 }
 // a mask you deleted in the game; if the name shows up again, it's grouped again by visit
@@ -337,7 +354,8 @@ function gridScore(r, grid) {
   return score;
 }
 function anchor(snap) {
-  const cands = Object.values(S.map.rooms).filter(r => r.name === snap.name);
+  // a room that carries another game key is somewhere else, whatever its name
+  const cands = Object.values(S.map.rooms).filter(r => r.name === snap.name && (!snap.key || !r.gk || r.gk === snap.key));
   if (cands.length === 1) return cands[0];
   if (cands.length < 2) return null;
   const scored = cands.map(r => ({ r, score: gridScore(r, snap.grid || {}) })).sort((a, b) => b.score - a.score);
@@ -351,7 +369,12 @@ function onRoom(snap) {
   for (const ex of Object.values(snap.exits || {})) if (ex && ex.aerial) ex.name = null;
   C.snap = snap;
   const cur = hereRoom();
-  if (!cur || cur.name !== snap.name) {
+  const keyed = snap.key ? roomByKey(snap.key) : null;
+  if (keyed) {
+    // the game says which room this is: exact, whatever the names or the tracking say
+    place(keyed.id, snap.name);
+    C.sure = true;
+  } else if (!cur || cur.name !== snap.name || (snap.key && cur.gk && cur.gk !== snap.key)) {
     const found = anchor(snap);
     if (found && found !== cur) { place(found.id, snap.name); C.sure = true; }
     // The panel shows another room than the one we think we're in, and no move explains it (a move
@@ -368,6 +391,65 @@ function onRoom(snap) {
   if (!C.sure) return;   // not sure where this is: don't write anything onto the map from it
   if (automapOn()) autoFill(hereRoom(), snap);
   checkRoom(hereRoom(), snap);   // issues.js: where map and game disagree
+}
+
+// ---------- The game's own data (bridge 1.7) ----------
+// The client gets each room from the server as data: {key: "x,y,z", name, description, image,
+// exits [{dir, tid, fly, locked}], nb [{dir, name, key}], ...}. It comes BEFORE the chat line about the
+// move, so it's held until that line has been handled (or for a moment, when there's none: login,
+// a ride's end), then read like a side panel snapshot, with the key added. With it, the side panel
+// itself isn't read any more. The game's x grows east, y north, z up.
+const CDN = "https://cdn.philadelphiabynight.net/";
+const DIR_KEY = { north: "N", northeast: "NE", east: "E", southeast: "SE", south: "S", southwest: "SW", west: "W", northwest: "NW", up: "UP", down: "DOWN" };
+const GAME_HOLD_MS = 1200;
+export function roomByKey(key) { return key ? Object.values(S.map.rooms).find(r => r.gk === key) || null : null; }
+function snapOf(g) {
+  const grid = {}, exits = {};
+  for (const n of g.nb || []) { const d = DIR_KEY[n.dir]; if (d && n.name) grid[d] = n.name; }
+  // walkable exits lead to the room next door on the grid, so it names them; flight exits skip
+  for (const e of g.exits || []) {
+    const d = DIR_KEY[e.dir];
+    if (d) exits[d] = { name: e.fly ? null : grid[d] || null, locked: !!e.locked, aerial: !!e.fly };
+  }
+  const image = !g.image ? "" : /^https?:/.test(g.image) ? g.image : CDN + String(g.image).replace(/^\/+/, "");
+  return { name: String(g.name || ""), description: String(g.description || ""), image, exits, grid, key: g.key || null, game: g };
+}
+function onGameRoom(g) {
+  if (!g || typeof g.name !== "string") return;
+  C.gameSeen = true;
+  if (g.day) noteGameNight(g.day);
+  flushGame();   // an older one still waiting: it's out of date now, but in order
+  const name = C.name;
+  C.pendingGame = { g, timer: setTimeout(() => withChar(name, flushGame), GAME_HOLD_MS) };
+}
+function flushGame() {
+  const p = C.pendingGame;
+  if (!p) return;
+  clearTimeout(p.timer);
+  C.pendingGame = null;
+  C.game = p.g;
+  onRoom(snapOf(p.g));
+}
+// The game's night ("night-2026-11-12"): gather.js counts hauls per night by it. A var, not a let:
+// gather.js asks while this module is still loading (the two import each other).
+var gameNight = null;
+function noteGameNight(day) {
+  const m = /(\d{4}-\d{2}-\d{2})/.exec(String(day));
+  if (m) gameNight = { id: m[1], at: Date.now() };
+}
+export function liveNight() { return gameNight && Date.now() - gameNight.at < 3 * 3600e3 ? gameNight.id : null; }
+// Who's playing, from the game: its id, real name and the mask's name. The real name is the
+// character's main name unless you picked another; a mask joins that character for good.
+function onGameChar(g, sess) {
+  if (!g || typeof g.name !== "string" || !g.name) return;
+  const real = g.name;
+  if (!A.first[real]) A.first[real] = Date.now();
+  const main = canon(real);
+  if (main !== real && !A.picked[main]) renameMain(main, real);   // the real name takes over a guessed one
+  const mine = canon(real);
+  if (g.alias && canon(g.alias) !== mine) mergeInto(canon(g.alias), mine);
+  if (sess) visitName[sess] = mine;
+  saveAliases();
 }
 
 // ---------- Auto-map (hidden: only while the URL has #automap) ----------
@@ -1074,8 +1156,7 @@ function onRelayItem(ev) {
     updateChip(); refreshLivePanel();
     return;
   }
-  if (ev.kind === "groom" || ev.kind === "gchar") return logGame({ type: ev.kind, g: ev.g }, "relay");
-  if (["move", "room", "sys", "train", "gather", "goto"].includes(ev.kind))
+  if (["move", "room", "sys", "train", "gather", "goto", "groom", "gchar"].includes(ev.kind))
     handleEvent({ ...ev, type: ev.kind, char: name }, "relay");
 }
 function relayDown(item) {
@@ -1216,31 +1297,23 @@ window.addEventListener("message", e => {
     queueGameEvent(m);
   } else if (m.type === "goto") {
     handleEvent(m, "direct");
-  } else if (m.type === "groom" || m.type === "gchar") {
-    logGame(m, "direct");
+  } else if ((m.type === "groom" || m.type === "gchar") && S.map) {
+    handleEvent(m, "direct");   // not through the burst queue: it comes before its move, and is held for it
   }
 });
-// The game's own room and character data (bridge 1.7). Only logged for now, to check what it says
-// against what the chat says; nothing uses it yet.
-let lastMoveLog = null;
-function logGame(m, via) {
-  const g = m.g || {};
-  if (m.type === "gchar") return console.debug(`[MM ${via}] character`, g);
-  const since = lastMoveLog ? ` ${Date.now() - lastMoveLog.t}ms after "${lastMoveLog.dir}"` : "";
-  console.debug(`[MM ${via}] room ${g.key} "${g.name}"${since}`, g);
-}
 // One game event, for the character it belongs to. Moving (or typing //goto) puts that character
 // in focus: it's the one being played right now.
 function handleEvent(e, via) {
-  if (e.type === "move") { lastMoveLog = { t: Date.now(), dir: e.dir }; console.debug(`[MM ${via}] move ${e.dir} to "${e.name}"`); }
   const name = typeof e.char === "string" && e.char ? identify(e.char, e.sess) : pathChar[via] || "";
   notePath(via, name);
   withChar(name, () => {
     C.via = via; C.seenAt = C.clientAt = Date.now();
     if (typeof e.char === "string" && e.char) C.shown = e.char !== C.name ? e.char : null;
     if (e.type === "move" || e.type === "goto" || !known().some(c => c.name === focus)) setFocus(name);
-    if (e.type === "room") onRoom(e.room);
-    else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
+    if (e.type === "room") { if (!C.gameSeen) onRoom(e.room); }   // the side panel, before bridge 1.7
+    else if (e.type === "groom") onGameRoom(e.g);
+    else if (e.type === "gchar") onGameChar(e.g, e.sess);
+    else if (e.type === "move") { onMove(String(e.dir || ""), String(e.name || "")); flushGame(); }
     else if (e.type === "sys") onSys(String(e.text || ""));
     else if (e.type === "train") onTrain(String(e.text || ""));
     else if (e.type === "gather") { onGather(String(e.text || "")); refreshLivePanel(); }

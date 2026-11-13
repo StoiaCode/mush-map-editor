@@ -4,7 +4,7 @@ import { commit } from "./persistence.js";
 import { render } from "./app.js";
 import { toast } from "./spaces.js";
 import { escapeHtml } from "./utils.js";
-import { hereRoom, positionSure, automapOn, liveCharacter } from "./live.js";
+import { hereRoom, positionSure, automapOn, liveCharacter, liveNight } from "./live.js";
 
 // ---------- Scavenging & harvesting (live.js) ----------
 // The bridge reports when /scavenge or /harvest is sent, and the result lines. From that:
@@ -40,7 +40,9 @@ const CAPPED_RE = /^You have (gathered all the night will give you|pushed your l
 // ---------- Game night ----------
 // "2026-10-14" for the night that began at 17:00 Berlin time on that date.
 let nightCache = { at: 0, id: "" };
-export function nightId(now = Date.now()) {
+// The game says which night it is (bridge 1.7, liveNight); this is the fallback without it.
+export function nightId(now) {
+  if (now === undefined) { const g = liveNight(); if (g) return g; now = Date.now(); }
   if (Math.abs(now - nightCache.at) < 30000) return nightCache.id;
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
