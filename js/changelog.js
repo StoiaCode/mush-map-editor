@@ -5,6 +5,27 @@
 // latest entry again; that's fine for patch notes.
 export const CHANGELOG = [
   {
+    id: "2026-11-route-flags",
+    date: "2026-11-13",
+    title: "Route flags, Reverse, unexplored exits",
+    html: `
+      <p><b>Route flags.</b> A room can now be marked <b>🏠 Haven</b>, <b>🔒 Lockable</b> or <b>🕳 Sewer</b>
+      (inspector → <i>Route flags</i>). Havens and lockable rooms can be locked, closing every exit to and from them.</p>
+      <ul>
+        <li>The route box gets <b>🔒 avoid lockable</b> and <b>🕳 avoid sewers</b> once your map has such rooms.
+        Routes then go around them when there's another way; your destination may still be one.
+        With no way around, you get the route anyway, with a note saying what it goes through.</li>
+        <li>Marked havens or sewers with a colour tag so far? <b>👁 View ▾ → 🏷 Legend</b>, at the bottom:
+        <i>Turn a colour into a room flag…</i> converts them in one go (Ctrl+Z undoes it).</li>
+      </ul>
+      <p><b>⇄ Reverse</b> in the route box: the way back to where the route started.</p>
+      <p><b>Unexplored exits.</b> <b>＋ Unexplored exit…</b> in the inspector notes an exit whose destination
+      you haven't mapped yet. It shows as a short dashed stub with a <b>?</b> on the map.</p>
+      <p><b>Smaller image cache.</b> Room images are cached as small copies sized for the map tiles, a fraction
+      of the space they used to take. The inspector still shows the full image.</p>
+      <p><b>Notices</b> at the top stay up longer when there's more to read. Hover to keep one, click to close it.</p>`,
+  },
+  {
     id: "2026-10-toolbar",
     date: "2026-10-02",
     title: "Toolbar cleanup",
