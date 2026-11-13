@@ -15,6 +15,7 @@ import { startDoorCapture, startSelectionCapture } from "./capture.js";
 import { startRelease } from "./release.js";
 import { liveBridge, setHere } from "./live.js";
 import { computePath } from "./search-path.js";
+import { ROOM_FLAGS } from "./constants.js";
 
 // ---------- Inspector ----------
 let openAddFor = null;   // room id whose "+ Unexplored exit" form is open
@@ -166,6 +167,9 @@ export function renderInspector() {
       `</div>`;
   }
   h += `<div class="insec"><span class="seclabel">Traits</span><div class="trait-chips" id="f_traits"></div></div>`;
+  h += `<div class="insec"><span class="seclabel">Route flags</span><div class="trait-chips" id="f_flags">` +
+    ROOM_FLAGS.map(f => `<button class="trait-chip${r[f.key] ? " sel" : ""}" data-flag="${f.key}" title="${f.tip}">${f.icon} ${f.label}</button>`).join("") +
+    `</div></div>`;
 
   h += `<div class="insec">
     <span class="seclabel">Carve (creates + links a neighbour)</span>
@@ -246,6 +250,11 @@ export function renderInspector() {
       traitWrap.appendChild(chip);
     });
   }
+  document.querySelectorAll("#f_flags [data-flag]").forEach(b => b.onclick = () => {
+    const f = b.dataset.flag;
+    if (r[f]) delete r[f]; else r[f] = true;
+    commit(); render();
+  });
   // text fields: live autosave on input, single undo step committed on blur/change
   document.getElementById("f_name").oninput = e => { r.name = e.target.value; save(); refreshRoomLabel(r); };
   document.getElementById("f_name").onchange = () => commit();

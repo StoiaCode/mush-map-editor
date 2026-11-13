@@ -30,3 +30,10 @@ export const DIRWORD = { N:"north", NE:"northeast", E:"east", SE:"southeast", S:
                           SW:"southwest", W:"west", NW:"northwest", UP:"up", DOWN:"down" };
 export const KEYCARVE = { q:"NW", w:"N", e:"NE", a:"W", d:"E", z:"SW", x:"S", c:"SE", r:"UP", f:"DOWN" };
 export function emptyTagLabels() { const o = {}; for (const p of PALETTE) o[p.name] = ""; return o; }
+// Room flags the route finder can steer around (inspector, legend conversion, search-path.js).
+// Haven and lockable stay separate for the map, but to the route finder both mean "may be locked".
+export const ROOM_FLAGS = [
+  { key: "haven",    icon: "🏠", label: "Haven",    tip: "Someone's haven: may be locked" },
+  { key: "lockable", icon: "🔒", label: "Lockable", tip: "Can be locked: all exits to and from it close then" },
+  { key: "sewer",    icon: "🕳", label: "Sewer",    tip: "Part of the sewers" },
+];

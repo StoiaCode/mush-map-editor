@@ -9,7 +9,7 @@ import { setSpace, toast, roomLocation } from "./spaces.js";
 import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
 import { stationLinesFor } from "./model.js";
-import { computePath, findPath } from "./search-path.js";
+import { computePath, bestRoute, throughText } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
 import { onGather, gatherHtml, mergeNightCounts } from "./gather.js";
@@ -689,9 +689,9 @@ function matchRooms(q) {
   const words = fold(q).split(" ");
   return all.filter(r => { const n = fold(r.name); return words.every(w => n.includes(w)); });
 }
-// walk-only first, trains only when there's no other way (same rule as the route box)
+// the route box's rules: walk-only first, trains only when there's no other way, around what it avoids
 function routeTo(fromId, toId, fly) {
-  return findPath(fromId, toId, fly, false) || findPath(fromId, toId, fly, true);
+  return bestRoute(fromId, toId, fly);
 }
 // "south south | east · 🚆 Broad Street Line to Northbound Platform · east": walk steps in the
 // chains the walker would send, flown steps marked ✈, trains spelled out.
@@ -735,16 +735,17 @@ function gotoRoomFromGame(target, fly, preview = false) {
   computePath(here.id, target.id);   // show it in the mapper too
   const summary = `${walkSteps} step${walkSteps !== 1 ? "s" : ""}` + (flown ? ` (${flown} flown)` : "") +
     (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "");
+  const through = throughText(res);
   if (preview) {
     // "//goto 1" walks exactly this room, even when other rooms share its name
     C.gotoList = [target.id]; C.gotoFly = !!fly; C.gotoPreview = false;
     const unique = Object.values(S.map.rooms).filter(r => r.name === target.name).length === 1;
-    return reply(`Route to ${target.name}: ${summary}.`, routeText(res),
+    return reply(`Route to ${target.name}: ${summary}.` + (through ? " " + through : ""), routeText(res),
       (unique ? `//goto ${fly ? "fly " : ""}${target.name} or ` : "") + "//goto 1 to walk it.");
   }
   startWalk(res, true);
   if (!C.W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
-  reply(`Walking to ${target.name}: ${summary}. //goto stop to stop.`);
+  reply(`Walking to ${target.name}: ${summary}.` + (through ? " " + through : "") + " //goto stop to stop.");
 }
 function onGoto(q) {
   if (!S.map) return;

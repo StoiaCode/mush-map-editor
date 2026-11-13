@@ -87,6 +87,7 @@ export function normalize() {
   if (!Array.isArray(map.traits)) map.traits = [];
   map.traits = map.traits.filter(t => t && typeof t.id === "string" && typeof t.emoji === "string" && typeof t.label === "string");
   const traitIds = new Set(map.traits.map(t => t.id));
+  const gkSeen = new Set();
   for (const r of Object.values(map.rooms)) {
     if (r.z == null) r.z = (r.level != null ? r.level : 0);
     delete r.level;
@@ -102,7 +103,17 @@ export function normalize() {
     if (r.imageUrl == null) r.imageUrl = "";
     if (!Array.isArray(r.traits)) r.traits = [];
     r.traits = r.traits.filter(id => traitIds.has(id));
+    // Route flags, any map: haven / lockable (both "may be locked" to the route finder), sewer.
+    for (const f of ["haven", "lockable", "sewer"]) if (r[f] !== true) delete r[f];
+    // Game data, only ever written by auto-map (live.js) and never shown: gk = the game's "x,y,z"
+    // for this room (one room per key), game = {tag, exposure, features, indoor}, hood = neighbourhood.
+    if (typeof r.gk !== "string" || !/^-?\d+,-?\d+,-?\d+$/.test(r.gk) || gkSeen.has(r.gk)) delete r.gk;
+    else gkSeen.add(r.gk);
+    if (!r.game || typeof r.game !== "object" || Array.isArray(r.game)) delete r.game;
+    if (typeof r.hood !== "string" || !r.hood) delete r.hood;
   }
+  // neighbourhoods by slug: {name, sect, notes} (auto-map only)
+  if (!map.hoods || typeof map.hoods !== "object" || Array.isArray(map.hoods)) delete map.hoods;
   if (map.currentLayer == null) map.currentLayer = layersPresent()[0];
   // backfill tag labels (older saves / imports won't have them)
   const labels = emptyTagLabels();

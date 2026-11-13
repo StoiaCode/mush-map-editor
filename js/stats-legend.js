@@ -1,4 +1,4 @@
-import { PALETTE, DIRS } from "./constants.js";
+import { PALETTE, DIRS, ROOM_FLAGS } from "./constants.js";
 import { S } from "./state.js";
 import { escapeHtml, areaHex } from "./utils.js";
 import { roomsInArea, layersPresent, roomsOnLayer, spaceOf } from "./model.js";
@@ -41,6 +41,28 @@ export function buildLegend() {
     cnt.className = "cnt"; cnt.textContent = cc[p.name]; cnt.title = cc[p.name] + " room(s) with this tag";
     row.appendChild(sw); row.appendChild(inp); row.appendChild(cnt); rows.appendChild(row);
   }
+  // For maps that marked havens or sewers by colour before there were room flags: one go, then
+  // never needed again, so it stays folded away at the bottom.
+  const conv = document.createElement("details");
+  conv.className = "legendconv";
+  conv.innerHTML = `<summary>Turn a colour into a room flag…</summary>
+    <div class="legendconvrow">
+      <select id="convColor">${PALETTE.map(p => `<option value="${p.name}">${escapeHtml(S.map.tagLabels[p.name] || p.name)} (${cc[p.name]})</option>`).join("")}</select>
+      → <select id="convFlag">${ROOM_FLAGS.map(f => `<option value="${f.key}">${f.icon} ${f.label}</option>`).join("")}</select>
+    </div>
+    <label class="legendconvrow"><input type="checkbox" id="convClear" checked> set those rooms back to Slate</label>
+    <button id="convGo">Convert</button>`;
+  rows.appendChild(conv);
+  conv.querySelector("#convGo").onclick = () => {
+    const color = conv.querySelector("#convColor").value, flag = conv.querySelector("#convFlag").value;
+    const clear = conv.querySelector("#convClear").checked;
+    const list = Object.values(S.map.rooms).filter(r => r.color === color);
+    const f = ROOM_FLAGS.find(x => x.key === flag);
+    if (!list.length) return;
+    if (!confirm(`Flag ${list.length} room${list.length !== 1 ? "s" : ""} as ${f.label}` + (clear && color !== "Slate" ? " and set their colour back to Slate" : "") + "? Ctrl+Z undoes it.")) return;
+    for (const r of list) { r[flag] = true; if (clear) r.color = "Slate"; }
+    commit(); render(); buildLegend();
+  };
 }
 export function buildStats() {
   const el = document.getElementById("statsBody");

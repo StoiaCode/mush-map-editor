@@ -166,6 +166,7 @@ export function mergeImport(data) {
   }
   const clampX = v => clamp(v, 0, GRID_N - 1), clampY = v => clamp(v, 0, GRID_N - 1);
   const newIds = [];
+  const gkHere = new Set(Object.values(S.map.rooms).map(r => r.gk).filter(Boolean));
   for (const r of src) {
     const nid = idMap[r.id];
     const sp = newSpace(r), sx = sp ? 0 : dx, sy = sp ? 0 : dy;
@@ -177,7 +178,16 @@ export function mergeImport(data) {
       const t = r.exits && r.exits[d];
       if (t && idMap[t]) { nr.exits[d] = idMap[t]; if (r.exitFly && r.exitFly[d]) nr.exitFly[d] = true; }
     }
+    for (const f of ["haven", "lockable", "sewer"]) if (r[f] === true) nr[f] = true;
+    // game data comes along, but a game key stays on one room only: the one already here keeps it
+    if (r.gk && !gkHere.has(r.gk)) { nr.gk = r.gk; gkHere.add(r.gk); }
+    if (r.game && typeof r.game === "object") nr.game = { ...r.game };
+    if (typeof r.hood === "string" && r.hood) nr.hood = r.hood;
     S.map.rooms[nid] = nr; newIds.push(nid);
+  }
+  if (data.hoods && typeof data.hoods === "object") {
+    S.map.hoods ||= {};
+    for (const [slug, h] of Object.entries(data.hoods)) if (!S.map.hoods[slug] && h && typeof h === "object") S.map.hoods[slug] = { ...h };
   }
   for (const a of (data.areas || [])) {
     const rects = (Array.isArray(a.rects) && a.rects.length) ? a.rects : [{ x: a.x, y: a.y, w: a.w, h: a.h }];  // accept new or legacy

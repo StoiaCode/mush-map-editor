@@ -144,6 +144,11 @@ select { cursor: pointer; }
   border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); cursor: pointer;
 }
 .trait-chip.sel { border-color: var(--accent); background: var(--accent2); color: #fff; }
+.legendconv { margin-top: 10px; font-size: 11px; color: var(--muted); }
+.legendconv summary { cursor: pointer; }
+.legendconvrow { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.legendconv select { flex: 1; min-width: 0; }
+.pathwarn { color: #e8c93a; }
 
 /* Compass + vertical carve rose */
 .rose { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }

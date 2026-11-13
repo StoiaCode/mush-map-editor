@@ -22,6 +22,8 @@ export const S = {
   transitBindPick: null,    // {lineId, stopId} awaiting a map click to bind as that stop's second room
   pathRooms: new Set(),     // rooms on the current shortest-path result (highlighted)
   pathCanFly: false,        // pathfinder may use flight-only exits
+  pathAvoidLock: false,     // ...steers around haven/lockable rooms (search-path.js, remembered per browser)
+  pathAvoidSewer: false,    // ...and around sewers
   pathLast: null,           // {startId, endId} of the last computed route, for recompute on toggle
   searchTerm: "",
   searchMatches: [],        // ids of rooms matching the search
