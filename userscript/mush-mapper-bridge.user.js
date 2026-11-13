@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.7.2
+// @version      1.7.3
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -40,8 +40,9 @@
 //                                                the game), or its result: "[You haul away 2 units of
 //                                                paper stock.]", "There is nothing worth scavenging here."
 //                every client event also carries char: the name the journal shows (an Obfuscate
-//                mask shows the mask's name), and sess: a token per visit to /play. Switching
-//                characters always leaves /play, so names seen in one visit are one character.
+//                mask shows the mask's name), sess: a token per visit to /play and per character
+//                the game reports, and tap: 1 once the game's own character data is coming
+//                (then that, not the visit, says which names are one character).
 //                {seq, kind:'groom', g}          the game's own data for the room you're in (see pageTap)
 //                {seq, kind:'gchar', g}          the game's data for who's playing: {id, name, alias}
 //   mm_reply   {seq, lines, char}            mapper → client: shown as a local [MAPPER] chat line
@@ -58,7 +59,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.2';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.3';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -182,18 +183,18 @@
       for (const ev of (v && v.events) || []) {
         if (ev.seq <= lastEvt) continue;
         lastEvt = ev.seq;
-        const char = ev.char || null, sess = ev.sess || null;
-        if (ev.kind === 'room') toPage('room', { room: ev.room, char, sess });
-        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q, char, sess }); }
-        else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char, sess });
-        else if (ev.kind === 'train') toPage('train', { text: ev.text, char, sess });
-        else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char, sess });
-        else if (ev.kind === 'groom' || ev.kind === 'gchar') toPage(ev.kind, { g: ev.g, char, sess });
-        else toPage('move', { dir: ev.dir, name: ev.name, char, sess });
+        const char = ev.char || null, sess = ev.sess || null, tap = ev.tap ? 1 : 0;
+        if (ev.kind === 'room') toPage('room', { room: ev.room, char, sess, tap });
+        else if (ev.kind === 'goto') { if (GM_getValue('mm_mapper') === tabId) toPage('goto', { q: ev.q, char, sess, tap }); }
+        else if (ev.kind === 'sys') toPage('sys', { text: ev.text, char, sess, tap });
+        else if (ev.kind === 'train') toPage('train', { text: ev.text, char, sess, tap });
+        else if (ev.kind === 'gather') toPage('gather', { text: ev.text, char, sess, tap });
+        else if (ev.kind === 'groom' || ev.kind === 'gchar') toPage(ev.kind, { g: ev.g, char, sess, tap });
+        else toPage('move', { dir: ev.dir, name: ev.name, char, sess, tap });
       }
     });
 
-    GM_addValueChangeListener('mm_pong', (key, oldV, v) => toPage('client', { char: (v && v.char) || null, sess: (v && v.sess) || null }));
+    GM_addValueChangeListener('mm_pong', (key, oldV, v) => toPage('client', { char: (v && v.char) || null, sess: (v && v.sess) || null, tap: v && v.tap ? 1 : 0 }));
     const ping = () => GM_setValue('mm_ping', { id: nextSeq() });
     setInterval(ping, 5000);
     ping();
@@ -254,6 +255,7 @@
       ev.seq = nextSeq();
       ev.char = characterName();   // the mapper forgets your position when this changes...
       ev.sess = sess;              // ...unless it's still the same visit to /play (a mask)
+      if (tapped.char) ev.tap = 1;
       events.push(ev);
       while (events.length > 20) events.shift();
       GM_setValue('mm_evt', { events: events.slice() });
@@ -310,7 +312,7 @@
     }, 1000);
     // tells the mapper this tab is alive and who's playing, like mm_pong does next door
     setInterval(() => {
-      if (onPlay && isActive() && GM_getValue('mm_relay')) { upQueue.push({ kind: 'pong', char: characterName(), sess }); flushUp(); }
+      if (onPlay && isActive() && GM_getValue('mm_relay')) { upQueue.push({ kind: 'pong', char: characterName(), sess, tap: tapped.char ? 1 : 0 }); flushUp(); }
     }, 5000);
 
     const seen = new WeakSet();
@@ -479,14 +481,22 @@
     // the game's own data (tapSocket): live while playing, and the latest again for a new visit
     // or a mapper that just turned up
     const pushTap = (kind, d) => { if (onPlay && isActive()) push({ kind: kind === 'char' ? 'gchar' : 'groom', g: d }); };
+    let tapId = null;   // the character the game last said is playing
+    function onTap(kind, d) {
+      if (kind === 'char' && d && d.id !== tapId) {
+        if (tapId !== null) sess = Math.random().toString(36).slice(2);   // another character: a new visit
+        tapId = d.id;
+      }
+      pushTap(kind, d);
+    }
     function pushTapped() {
       if (tapped.char) pushTap('char', tapped.char);
       if (tapped.room) pushTap('room', tapped.room);
     }
-    tapped.on = pushTap;
+    tapped.on = onTap;
     GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
       mapperPinged();
-      if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName(), sess });
+      if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName(), sess, tap: tapped.char ? 1 : 0 });
     });
     GM_addValueChangeListener('mm_reply', (key, oldV, v) => {
       if (isActive() && v && Array.isArray(v.lines) && myChar(v.char)) localLine(v.lines);
@@ -639,6 +649,8 @@
 
     function exit() {
       onPlay = false;
+      tapped.char = tapped.room = null;   // stale for whoever plays next
+      tapId = null;
       if (isActive()) GM_setValue('mm_active', '');
       if (waiter) { waiter.disconnect(); waiter = null; }
       if (chatObserver) { chatObserver.disconnect(); chatObserver = null; }

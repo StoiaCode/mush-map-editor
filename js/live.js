@@ -97,21 +97,23 @@ function charState(name) {
 }
 
 // ---------- Masks ----------
-// Obfuscate masks change the name the journal (and so the bridge) reports. The bridge also sends a
-// token per visit to /play, and switching characters always leaves /play: every name seen in one
-// visit is the same character. Those names are grouped under one main name, everything else being
+// Obfuscate masks change the name the journal (and so the bridge) reports. From bridge 1.7.3 on
+// (events with tap), the game's own character data says who's behind a mask (onGameChar); nothing
+// else merges names then. Older bridges only send a token per visit to /play: every name seen in
+// one visit is taken to be the same character. Those names are grouped under one main name, everything else being
 // an alias of it, remembered from then on (logging in with a known mask on is recognised at once).
 // Which name is the main one can't be told from the game (you can go from mask to mask without the
 // real name ever showing), so it's yours to pick in the 📡 panel; until then it's the name this
 // mapper has known longest. A picked main name is never changed by anything automatic.
 const ALIAS_KEY = "mushMapEditor.aliases.v1";
-// alias: name -> name it stands for; first/seen: name -> first/last seen (ms); picked: main name -> true
-let A = { alias: {}, first: {}, seen: {}, picked: {} };
+// alias: name -> name it stands for; first/seen: name -> first/last seen (ms); picked: main name -> true;
+// real: a character's real name (from the game) -> its id. Two real names are never one character.
+let A = { alias: {}, first: {}, seen: {}, picked: {}, real: {} };
 const visitName = {};               // visit token -> main name of that visit's character (this page load)
 function loadAliases() {
   try {
     const o = JSON.parse(localStorage.getItem(ALIAS_KEY) || "{}");
-    A = { alias: o.alias || {}, first: o.first || {}, seen: o.seen || {}, picked: o.picked || {} };
+    A = { alias: o.alias || {}, first: o.first || {}, seen: o.seen || {}, picked: o.picked || {}, real: o.real || {} };
   } catch (e) { /* no storage: masks are re-learned each visit */ }
 }
 function saveAliases() { try { localStorage.setItem(ALIAS_KEY, JSON.stringify(A)); } catch (e) { /* ignore */ } }
@@ -124,7 +126,7 @@ function namesOf(main) {
   return [main, ...Object.keys(A.alias).filter(n => n !== main && canon(n) === main)];
 }
 // The character behind a reported name (and visit token).
-function identify(shown, sess) {
+function identify(shown, sess, tap) {
   const name = canon(shown);
   if (!name) return name;
   const now = Date.now();
@@ -132,7 +134,7 @@ function identify(shown, sess) {
   A.seen[shown] = now;
   if (!A.first[name]) A.first[name] = now;
   if (stale) saveAliases();
-  if (!sess) return name;
+  if (!sess || tap) return name;
   const before = visitName[sess] !== undefined ? canon(visitName[sess]) : undefined;
   if (before === undefined || before === name) { visitName[sess] = name; return name; }
   return mergeNames(before, name, sess);
@@ -140,6 +142,7 @@ function identify(shown, sess) {
 // Two names met in one visit: one character. A picked main name stays; otherwise the one known
 // longer (names from before masks were told apart all count as old: then more recorded moves).
 function mergeNames(a, b, sess) {
+  if (twoReal(a, b)) { visitName[sess] = b; return b; }
   const fa = A.first[a] || Infinity, fb = A.first[b] || Infinity;
   const keep = A.picked[a] ? a : A.picked[b] ? b :
     fa !== fb ? (fa < fb ? a : b) : recordedSteps(a) >= recordedSteps(b) ? a : b;
@@ -184,9 +187,15 @@ function renameMain(main, name) {
   absorb(main, name);
   render(); updateChip();
 }
+// Is any name of `a` the real name of another character than any name of `b`?
+function twoReal(a, b) {
+  const ids = m => namesOf(m).filter(n => A.real[n] !== undefined).map(n => A.real[n]);
+  const x = ids(a), y = ids(b);
+  return x.length > 0 && y.length > 0 && !x.some(i => y.includes(i));
+}
 // The game says `drop` (a mask) is the character called `keep`.
 function mergeInto(drop, keep) {
-  if (drop === keep) return;
+  if (drop === keep || twoReal(drop, keep)) return;
   for (const [n, to] of Object.entries(A.alias)) if (to === drop) A.alias[n] = keep;
   A.alias[drop] = keep;
   delete A.picked[drop];
@@ -200,6 +209,23 @@ function pickMainName(main, name) {
   A.picked[name] = true;
   saveAliases();
   toast(`🎭 This character goes by <b>${escapeHtml(name)}</b> now.`);
+}
+// `name` (a real name) was grouped with another character by mistake: it's its own again, with
+// whichever masks the game has tied to it since. Moves recorded meanwhile stay with the other one.
+function splitOff(name) {
+  const main = canon(name);
+  if (main === name) {
+    // it's the main name: the other real name (the first one) takes over the rest of the group
+    const other = namesOf(main).find(n => n !== name && A.real[n] !== undefined && A.real[n] !== A.real[name]);
+    if (!other) return;
+    for (const [n, to] of Object.entries(A.alias)) if (to === name) A.alias[n] = other;
+    delete A.alias[other];   // the live state stays with `name`: it's the one playing now
+  } else {
+    for (const [n, to] of Object.entries(A.alias)) if (to === name) A.alias[n] = main;
+    delete A.alias[name];
+  }
+  saveAliases();
+  syncMarkers(); render(); updateChip(); refreshLivePanel();
 }
 // a mask you deleted in the game; if the name shows up again, it's grouped again by visit
 function forgetName(name) {
@@ -487,6 +513,12 @@ function onGameChar(g, sess) {
   if (!g || typeof g.name !== "string" || !g.name) return;
   const real = g.name;
   if (!A.first[real]) A.first[real] = Date.now();
+  if (g.id !== undefined && g.id !== null) {
+    A.real[real] = g.id;
+    // merged into another character by mistake (another real name in its group): take it out
+    for (const n of namesOf(canon(real)))
+      if (n !== real && A.real[n] !== undefined && A.real[n] !== g.id) { splitOff(real); break; }
+  }
   const main = canon(real);
   if (main !== real && !A.picked[main]) renameMain(main, real);   // the real name takes over a guessed one
   const mine = canon(real);
@@ -1280,7 +1312,7 @@ async function relayPoll() {
 function onRelayItem(ev) {
   if (!ev || typeof ev !== "object") return;
   R.seenAt = Date.now();
-  const name = typeof ev.char === "string" && ev.char ? identify(ev.char, ev.sess) : pathChar.relay || "";
+  const name = typeof ev.char === "string" && ev.char ? identify(ev.char, ev.sess, ev.tap) : pathChar.relay || "";
   if (ev.kind === "pong") {
     notePath("relay", name);
     charState(name).clientAt = Date.now();
@@ -1418,7 +1450,7 @@ window.addEventListener("message", e => {
   if (L.sending) return;   // this browser's game is followed by the mapper on the linked device
   if (m.type === "client") {
     // a pong without a name (journal not loaded yet) still says the tab is there
-    const name = m.char ? identify(String(m.char), m.sess) : pathChar.direct;
+    const name = m.char ? identify(String(m.char), m.sess, m.tap) : pathChar.direct;
     if (name !== null) {
       if (m.char) notePath("direct", name);
       charState(name).clientAt = Date.now();
@@ -1435,7 +1467,8 @@ window.addEventListener("message", e => {
 // One game event, for the character it belongs to. Moving (or typing //goto) puts that character
 // in focus: it's the one being played right now.
 function handleEvent(e, via) {
-  const name = typeof e.char === "string" && e.char ? identify(e.char, e.sess) : pathChar[via] || "";
+  if (e.type === "gchar") onGameChar(e.g, e.sess);   // first: it may say whose mask the shown name is
+  const name = typeof e.char === "string" && e.char ? identify(e.char, e.sess, e.tap) : pathChar[via] || "";
   notePath(via, name);
   withChar(name, () => {
     C.via = via; C.seenAt = C.clientAt = Date.now();
@@ -1443,7 +1476,7 @@ function handleEvent(e, via) {
     if (e.type === "move" || e.type === "goto" || !known().some(c => c.name === focus)) setFocus(name);
     if (e.type === "room") { if (!C.gameSeen) onRoom(e.room); }   // the side panel, before bridge 1.7
     else if (e.type === "groom") onGameRoom(e.g);
-    else if (e.type === "gchar") onGameChar(e.g, e.sess);
+    else if (e.type === "gchar") { /* read above */ }
     else if (e.type === "move") { onMove(String(e.dir || ""), String(e.name || "")); flushGame(); }
     else if (e.type === "sys") onSys(String(e.text || ""));
     else if (e.type === "train") onTrain(String(e.text || ""));
