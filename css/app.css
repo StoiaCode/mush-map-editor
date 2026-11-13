@@ -347,7 +347,7 @@ select { cursor: pointer; }
   box-shadow: 0 6px 18px rgba(0,0,0,.6); font-size: 13px; max-width: min(560px, calc(100% - 32px)); text-align: center;
   opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
 }
-#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; cursor: pointer; }
 #toast .tdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
 #app.in-space #toast { top: 52px; }
 /* door badges: the room leads into another space */

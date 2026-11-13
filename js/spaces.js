@@ -104,13 +104,21 @@ export function announceLocation(verb = "Now in") {
 }
 
 let toastTimer = null;
+// Stays long enough to read: 3.5s, plus about a second per 15 characters, up to 12s. Hovering keeps
+// it up, a click closes it.
 export function toast(html) {
   const el = document.getElementById("toast");
   if (!el) return;
   el.innerHTML = html;
   el.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+  const len = el.textContent.length;
+  const ms = Math.min(12000, 3500 + Math.max(0, len - 40) * 65);
+  const hide = () => el.classList.remove("show");
+  const arm = t => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, t); };
+  el.onmouseenter = () => clearTimeout(toastTimer);
+  el.onmouseleave = () => arm(1500);
+  el.onclick = () => { clearTimeout(toastTimer); hide(); };
+  arm(ms);
 }
 
 // ---------- Location chrome (breadcrumb, frame, corner tag) ----------
