@@ -459,16 +459,16 @@ function onGameRoom(g) {
   if (dir) gameStep(prev, dir, g);
   onRoom(snapOf(g));
 }
-// Which exit of game room `prev` leads to key `to`: a known one, else one step on the grid.
-// Null for anything else (a flight across several tiles, a ride, a teleport, logging in).
+// Which exit of game room `prev` leads to key `to`: one step on the grid by the coordinates, else
+// a known exit (a flight). Null for anything else (a ride, a teleport, logging in).
 function stepDir(prev, to) {
-  for (const [d, k] of Object.entries(exitKeys(prev))) if (k === to) return d;
   const a = keyXYZ(prev.key), b = keyXYZ(to);
-  if (!a || !b) return null;
+  const known = () => { for (const [d, k] of Object.entries(exitKeys(prev))) if (k === to) return d; return null; };
+  if (!a || !b) return known();
   const dx = b[0] - a[0], dy = a[1] - b[1], dz = b[2] - a[2];   // map y grows south
   if (!dx && !dy && Math.abs(dz) === 1) return dz > 0 ? "UP" : "DOWN";
-  if (dz || Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) return null;
-  return COMPASS.find(d => VEC[d] && VEC[d][0] === dx && VEC[d][1] === dy) || null;
+  if (dz || Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) return known();
+  return COMPASS.find(d => VEC[d] && VEC[d][0] === dx && VEC[d][1] === dy) || known();
 }
 // A step through exit `dir` of game room `prev` into `g`. A room the map has under g's key is
 // placed exactly by onRoom; otherwise the step is followed on the map like a move line was.
@@ -502,8 +502,10 @@ function cellFor(from, fromKey, to) {
 }
 // Exit ids → game keys, learned by walking through them (auto-map only). The id is on the exit,
 // never on the room it leads to, so this is the only way to know where an exit goes before going.
-// Per browser: nothing in the map, and quickly learned again.
-const IDS_KEY = "mushMapEditor.gameIds.v1";
+// Per browser: nothing in the map, and quickly learned again. (v1 was dropped: steps paired with
+// the wrong room data taught it wrong ids.)
+const IDS_KEY = "mushMapEditor.gameIds.v2";
+try { localStorage.removeItem("mushMapEditor.gameIds.v1"); } catch (e) { /* ignore */ }
 let IDS = {};
 try { IDS = JSON.parse(localStorage.getItem(IDS_KEY) || "{}") || {}; } catch (e) { /* relearned */ }
 function learnExit(from, dir, toKey) {
@@ -512,15 +514,15 @@ function learnExit(from, dir, toKey) {
   IDS[e.tid] = toKey;
   try { localStorage.setItem(IDS_KEY, JSON.stringify(IDS)); } catch (err) { /* ignore */ }
 }
-// where each of the game room's exits leads, as game keys, when known: learned ids first, then
-// for walkable exits the room next door on the grid
+// where each of the game room's exits leads, as game keys, when known: for walkable exits the room
+// next door on the grid (the game says so itself), else (flights) the learned ids
 function exitKeys(g) {
   const out = {};
   for (const e of g.exits || []) {
     const d = DIR_KEY[e.dir];
     if (!d) continue;
     const nb = !e.fly && (g.nb || []).find(n => DIR_KEY[n.dir] === d);
-    const k = IDS[e.tid] || (nb && nb.key) || null;
+    const k = (nb && nb.key) || IDS[e.tid] || null;
     if (k) out[d] = k;
   }
   return out;
