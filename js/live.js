@@ -92,7 +92,6 @@ function charState(name) {
     via: "direct",      // "direct" (this browser's bridge) or "relay" (another device)
     shown: null,        // the name the journal shows right now, when it's a mask
     gameSeen: false,    // the game's own room data arrives for this one (bridge 1.7): the side panel isn't read
-    pendingGame: null,  // {g, timer}: a game room held until its chat line ("You move...") has been handled
   };
 }
 
@@ -431,13 +430,13 @@ function onRoom(snap) {
 
 // ---------- The game's own data (bridge 1.7) ----------
 // The client gets each room from the server as data: {key: "x,y,z", name, description, image,
-// exits [{dir, tid, fly, locked}], nb [{dir, name, key}], ...}. It comes BEFORE the chat line about the
-// move, so it's held until that line has been handled (or for a moment, when there's none: login,
-// a ride's end), then read like a side panel snapshot, with the key added. With it, the side panel
-// itself isn't read any more. The game's x grows east, y north, z up.
+// exits [{dir, tid, fly, locked}], nb [{dir, name, key}], ...}. Each one is read the moment it comes:
+// the step from the last one (which exit leads to the new key) is the move, so the chat line about
+// it isn't needed to place you (it still moves a route walk along). It's read like a side panel
+// snapshot, with the key added; the side panel itself isn't read any more. The game's x grows east,
+// y north, z up.
 const CDN = "https://cdn.philadelphiabynight.net/";
 const DIR_KEY = { north: "N", northeast: "NE", east: "E", southeast: "SE", south: "S", southwest: "SW", west: "W", northwest: "NW", up: "UP", down: "DOWN" };
-const GAME_HOLD_MS = 1200;
 export function roomByKey(key) { return key ? Object.values(S.map.rooms).find(r => r.gk === key) || null : null; }
 function snapOf(g) {
   const grid = {}, exits = {};
@@ -454,17 +453,36 @@ function onGameRoom(g) {
   if (!g || typeof g.name !== "string") return;
   C.gameSeen = true;
   if (g.day) noteGameNight(g.day);
-  flushGame();   // an older one still waiting: it's out of date now, but in order
-  const name = C.name;
-  C.pendingGame = { g, timer: setTimeout(() => withChar(name, flushGame), GAME_HOLD_MS) };
+  const prev = C.game;
+  C.game = g;
+  const dir = prev && g.key && prev.key !== g.key ? stepDir(prev, g.key) : null;
+  if (dir) gameStep(prev, dir, g);
+  onRoom(snapOf(g));
 }
-function flushGame() {
-  const p = C.pendingGame;
-  if (!p) return;
-  clearTimeout(p.timer);
-  C.pendingGame = null;
-  C.game = p.g;
-  onRoom(snapOf(p.g));
+// Which exit of game room `prev` leads to key `to`: a known one, else one step on the grid.
+// Null for anything else (a flight across several tiles, a ride, a teleport, logging in).
+function stepDir(prev, to) {
+  for (const [d, k] of Object.entries(exitKeys(prev))) if (k === to) return d;
+  const a = keyXYZ(prev.key), b = keyXYZ(to);
+  if (!a || !b) return null;
+  const dx = b[0] - a[0], dy = a[1] - b[1], dz = b[2] - a[2];   // map y grows south
+  if (!dx && !dy && Math.abs(dz) === 1) return dz > 0 ? "UP" : "DOWN";
+  if (dz || Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) return null;
+  return COMPASS.find(d => VEC[d] && VEC[d][0] === dx && VEC[d][1] === dy) || null;
+}
+// A step through exit `dir` of game room `prev` into `g`. A room the map has under g's key is
+// placed exactly by onRoom; otherwise the step is followed on the map like a move line was.
+function gameStep(prev, dir, g) {
+  if (automapOn()) learnExit(prev, dir, g.key);
+  if (roomByKey(g.key)) return;
+  const from = hereRoom();
+  if (!from) return;
+  let to = null;
+  autoWarned = false;
+  if (automapOn() && positionSure() && !from.exits[dir]) to = autoStep(from, dir, g.name, prev, g);
+  if (!to) to = resolveMove(from, dir, g.name);
+  if (!to && !autoWarned) toast(`📍 ${who()}Lost: “${escapeHtml(g.name)}” isn't on the map (or not uniquely). Select it and press 📍 I'm here.`);
+  place(to ? to.id : null, g.name);
 }
 // The game's night ("night-2026-11-12"): gather.js counts hauls per night by it. A var, not a let:
 // gather.js asks while this module is still loading (the two import each other).
@@ -556,14 +574,14 @@ function linkBoth(a, dir, b, fly) {
 }
 // Called on a move along an exit the map doesn't have yet. Returns the room we're now in, or null.
 let autoWarned = false;   // autoStep explained why it stopped: don't bury that under "Lost"
-function autoStep(from, dir, name) {
+function autoStep(from, dir, name, origG, destG) {
   const took = C.snap && C.snap.name === from.name && C.snap.exits ? C.snap.exits[dir] : null;
   const fly = !!(took && took.aerial);
-  // The game's data for where this move went (it arrives before the chat line, see onGameRoom) and
-  // for where it started: the new room's place follows from the two keys, and a room the map has
-  // under that key is that room, wherever it is (another space included).
-  const dest = C.pendingGame && norm(C.pendingGame.g.name) === norm(name) ? C.pendingGame.g : null;
-  const orig = C.game && from.gk && C.game.key === from.gk ? C.game : null;
+  // The game's data for where this step went and where it started (gameStep): the new room's place
+  // follows from the two keys, and a room the map has under that key is that room, wherever it is
+  // (another space included).
+  const dest = destG || null;
+  const orig = origG && from.gk && origG.key === from.gk ? origG : null;
   if (dest && dest.key) {
     if (orig) learnExit(orig, dir, dest.key);
     const known = roomByKey(dest.key);
@@ -713,9 +731,8 @@ function autoFill(r, snap) {
 
 function onMove(word, name) {
   const dir = DIR_OF[(word || "").toLowerCase()] || null;
-  // auto-map: the exit just taken leads to the room the game sent before this line
-  if (automapOn() && dir && C.game && C.pendingGame && C.pendingGame.g.key) learnExit(C.game, dir, C.pendingGame.g.key);
-  if (dir && positionSure()) noteArrived(hereRoom(), dir, name);
+  // with the game's own data (bridge 1.7) the room data has placed you already (gameStep)
+  if (dir && positionSure() && !C.gameSeen) noteArrived(hereRoom(), dir, name);
   C.riding = null;
   const W = C.W;
   if (W) {
@@ -727,12 +744,13 @@ function onMove(word, name) {
     } else {
       W.done++; W.lastMove = Date.now();
       if (W.done > W.sent) W.sent = W.done;   // it walked a step we'd taken back after "too quickly"
-      place(exp.toId, name);   // the route's room is the mapped exit we meant to take
+      if (!C.gameSeen) place(exp.toId, name);   // the route's room is the mapped exit we meant to take
       if (W.done === W.steps.length) finishWalk(); else pump();
       updateChip();
       return;
     }
   }
+  if (C.gameSeen) return;
   const from = hereRoom();
   let to = null;
   autoWarned = false;
@@ -1462,7 +1480,7 @@ window.addEventListener("message", e => {
   } else if (m.type === "goto") {
     handleEvent(m, "direct");
   } else if ((m.type === "groom" || m.type === "gchar") && S.map) {
-    handleEvent(m, "direct");   // not through the burst queue: it comes before its move, and is held for it
+    handleEvent(m, "direct");   // not through the burst queue: it places you by itself
   }
 });
 // One game event, for the character it belongs to. Moving (or typing //goto) puts that character
@@ -1478,7 +1496,7 @@ function handleEvent(e, via) {
     if (e.type === "room") { if (!C.gameSeen) onRoom(e.room); }   // the side panel, before bridge 1.7
     else if (e.type === "groom") onGameRoom(e.g);
     else if (e.type === "gchar") { /* read above */ }
-    else if (e.type === "move") { onMove(String(e.dir || ""), String(e.name || "")); flushGame(); }
+    else if (e.type === "move") onMove(String(e.dir || ""), String(e.name || ""));
     else if (e.type === "sys") onSys(String(e.text || ""));
     else if (e.type === "train") onTrain(String(e.text || ""));
     else if (e.type === "gather") { onGather(String(e.text || "")); refreshLivePanel(); }
