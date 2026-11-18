@@ -779,7 +779,7 @@ export function startWalk(res, fromGame = false) {
     : { dir: s.dir, toId: res.rooms[i + 1] });
   if (!steps.length) { toast("Nothing to walk."); return; }
   if (!alive(C)) { toast(`📡 ${who()}No MUSH tab answering. Open (or click into) the MUSH client tab first.`); return; }
-  place(res.rooms[0]);   // you start the walk at the route's start
+  if (!C.gameSeen) place(res.rooms[0]);   // you start the walk at the route's start (the game's data says where you are)
   const name = C.name;
   const W = C.W = { steps, sent: 0, done: 0, lastMove: Date.now(), timer: null, fromGame, retries: 0, phase: null };
   W.timer = setInterval(() => withChar(name, () => {
@@ -1369,7 +1369,8 @@ async function flushDown() {
   if (ok && R.out.length) flushDown();   // queued while this batch was on its way
 }
 setInterval(relayPoll, RELAY_POLL_MS);
-setInterval(() => { if (R.code) relayDown({ kind: "ping" }); }, RELAY_PING_MS);   // lets the other tab's //goto know we're here
+const PAGE_ID = Math.random().toString(36).slice(2);   // a reloaded mapper is a new one: the PbN tab sends the room again
+setInterval(() => { if (R.code) relayDown({ kind: "ping", tab: PAGE_ID }); }, RELAY_PING_MS);   // lets the other tab's //goto know we're here
 function relayHtml() {
   if (!L.bridge) return "";
   let h = `<div class="livelabel livesettings">Link another device</div>`;
@@ -1500,6 +1501,9 @@ function handleEvent(e, via) {
   notePath(via, name);
   withChar(name, () => {
     C.via = via; C.seenAt = C.clientAt = Date.now();
+    // the bridge reads the game's own data (1.7.3+): chat lines never place or link anything then,
+    // even before this character's first room data has come in
+    if (e.tap) C.gameSeen = true;
     if (typeof e.char === "string" && e.char) C.shown = e.char !== C.name ? e.char : null;
     if (e.type === "move" || e.type === "goto" || !known().some(c => c.name === focus)) setFocus(name);
     if (e.type === "room") { if (!C.gameSeen) onRoom(e.room); }   // the side panel, before bridge 1.7

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MUSH Mapper bridge
 // @namespace    stoia.red
-// @version      1.7.4
+// @version      1.7.5
 // @description  Links MUSH Mapper to the Philadelphia by Night client: the map follows your position, and routes can be walked for you.
 // @match        https://map.stoia.red/*
 // @match        http://localhost/*
@@ -50,7 +50,8 @@
 //                                            through the site's relay (server/app.py), instead of a
 //                                            mapper here: events go to <api>/relay/<code>/up, commands
 //                                            come from .../down. Set from this browser's mapper page.
-//   mm_ping / mm_pong {id, char}             is a PbN tab there, and which character is it?
+//   mm_ping / mm_pong {id, tab} / {id, char} is a PbN tab there, and which character is it? (tab: the
+//                                            mapper tab pinging; a new one gets the current room at once)
 //   mm_active  tab id                        only the most recently used PbN tab acts, so a second
 //                                            tab (a second window, say) neither doubles commands nor reports moves
 //   mm_mapper  tab id                        likewise only the most recently used mapper tab answers
@@ -59,7 +60,7 @@
   'use strict';
 
   // read from the @version header above, so the two can't drift apart (GM_info needs no @grant)
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.4';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.7.5';
   let seqBase = 0;
   const nextSeq = () => (seqBase = Math.max(Date.now(), seqBase + 1));
 
@@ -204,7 +205,7 @@
     });
 
     GM_addValueChangeListener('mm_pong', (key, oldV, v) => toPage('client', { char: (v && v.char) || null, sess: (v && v.sess) || null, tap: v && v.tap ? 1 : 0 }));
-    const ping = () => GM_setValue('mm_ping', { id: nextSeq() });
+    const ping = () => GM_setValue('mm_ping', { id: nextSeq(), tab: tabId });
     setInterval(ping, 5000);
     ping();
     hello();
@@ -313,7 +314,7 @@
       downBusy = false;
       if (!res) return;
       if (downAfter >= 0) for (const m of res.items || []) {
-        if (m.kind === 'ping') mapperPinged();
+        if (m.kind === 'ping') mapperPinged(m.tab);
         else if (m.kind === 'cmd' && Array.isArray(m.cmds) && myChar(m.char)) sendLines(m.cmds.map(String).slice(0, 20));
         else if (m.kind === 'reply' && Array.isArray(m.lines) && myChar(m.char)) localLine(m.lines.map(String).slice(0, 15));
       }
@@ -482,9 +483,12 @@
     }
     let mapperSeen = 0;   // mapper tabs ping every 5s
     // A mapper that just opened only knows where this character was last time: show it the room now.
-    function mapperPinged() {
-      const fresh = Date.now() - mapperSeen > 15000;
+    let mapperTab = null;
+    function mapperPinged(tab) {
+      // a mapper that was away, or a new mapper tab (one reloaded right after the last one pinged)
+      const fresh = Date.now() - mapperSeen > 15000 || (tab && tab !== mapperTab);
       mapperSeen = Date.now();
+      if (tab) mapperTab = tab;
       if (fresh && onPlay && isActive()) { reportRoom(null); pushTapped(); }
     }
     // the game's own data (tapSocket): live while playing, and the latest again for a new visit
@@ -504,7 +508,7 @@
     }
     tapped.on = onTap;
     GM_addValueChangeListener('mm_ping', (key, oldV, v) => {
-      mapperPinged();
+      mapperPinged(v && v.tab);
       if (isActive()) GM_setValue('mm_pong', { id: v && v.id, char: characterName(), sess, tap: tapped.char ? 1 : 0 });
     });
     GM_addValueChangeListener('mm_reply', (key, oldV, v) => {
