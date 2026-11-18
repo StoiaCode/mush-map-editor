@@ -459,16 +459,21 @@ function onGameRoom(g) {
   if (dir) gameStep(prev, dir, g);
   onRoom(snapOf(g));
 }
-// Which exit of game room `prev` leads to key `to`: one step on the grid by the coordinates, else
-// a known exit (a flight). Null for anything else (a ride, a teleport, logging in).
+// Which exit of game room `prev` leads to key `to`. Only an exit `prev` really has counts: one whose
+// destination is known to be `to`, or a walkable one pointing that way by the coordinates whose
+// destination isn't known to be anywhere else. Null for anything else (an elevator, a ride, a
+// teleport, logging in): onRoom then finds the room by its key or name, and nothing gets linked.
 function stepDir(prev, to) {
+  const keys = exitKeys(prev);
+  for (const [d, k] of Object.entries(keys)) if (k === to) return d;
   const a = keyXYZ(prev.key), b = keyXYZ(to);
-  const known = () => { for (const [d, k] of Object.entries(exitKeys(prev))) if (k === to) return d; return null; };
-  if (!a || !b) return known();
+  if (!a || !b) return null;
   const dx = b[0] - a[0], dy = a[1] - b[1], dz = b[2] - a[2];   // map y grows south
-  if (!dx && !dy && Math.abs(dz) === 1) return dz > 0 ? "UP" : "DOWN";
-  if (dz || Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) return known();
-  return COMPASS.find(d => VEC[d] && VEC[d][0] === dx && VEC[d][1] === dy) || known();
+  let d = null;
+  if (!dx && !dy && Math.abs(dz) === 1) d = dz > 0 ? "UP" : "DOWN";
+  else if (!dz && Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && (dx || dy)) d = COMPASS.find(c => VEC[c][0] === dx && VEC[c][1] === dy) || null;
+  const e = d && (prev.exits || []).find(x => DIR_KEY[x.dir] === d);
+  return e && !e.fly && !keys[d] ? d : null;
 }
 // A step through exit `dir` of game room `prev` into `g`. A room the map has under g's key is
 // placed exactly by onRoom; otherwise the step is followed on the map like a move line was.
@@ -476,7 +481,9 @@ function gameStep(prev, dir, g) {
   if (automapOn()) learnExit(prev, dir, g.key);
   if (roomByKey(g.key)) return;
   const from = hereRoom();
-  if (!from) return;
+  // only from the room the step really started in: a position left behind (somewhere the map
+  // couldn't follow) must never get the new room linked onto it
+  if (!from || (from.gk ? from.gk !== prev.key : norm(from.name) !== norm(prev.name))) return;
   let to = null;
   autoWarned = false;
   if (automapOn() && positionSure() && !from.exits[dir]) to = autoStep(from, dir, g.name, prev, g);
