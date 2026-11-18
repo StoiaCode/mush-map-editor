@@ -110,48 +110,55 @@ export function findPath(startId, endId, allowFly, allowTrain, avoid = null) {
   return null;
 }
 // The route the route box and //goto use. Trains are a last resort: only tried if no walk-only
-// route exists at all (see model.js docs). Steering around flagged rooms comes first; when there's
-// no way around them, the route through is returned anyway, marked `through` (what it goes through).
-const ROUTE_KEY = "mushMapEditor.route.v1";
-try {
-  const o = JSON.parse(localStorage.getItem(ROUTE_KEY) || "{}");
-  S.pathAvoidLock = !!o.lock; S.pathAvoidSewer = !!o.sewer;
-} catch (e) { /* no storage: both off */ }
-function saveRoutePrefs() {
-  try { localStorage.setItem(ROUTE_KEY, JSON.stringify({ lock: S.pathAvoidLock, sewer: S.pathAvoidSewer })); } catch (e) { /* ignore */ }
+// route exists at all (see model.js docs). Like flight, going through havens/lockable rooms and
+// sewers has to be allowed: opts {fly, lock, sewer}. Without, there's no route that way (routeHint
+// says what would give one). Your start and destination may be such rooms.
+try { localStorage.removeItem("mushMapEditor.route.v1"); } catch (e) { /* the old "avoid" switches */ }
+export function bestRoute(startId, endId, opts = {}) {
+  const avoid = { lock: !opts.lock, sewer: !opts.sewer };
+  return findPath(startId, endId, !!opts.fly, false, avoid) || findPath(startId, endId, !!opts.fly, true, avoid);
 }
-export function bestRoute(startId, endId, fly) {
-  const avoid = { lock: S.pathAvoidLock && mapHas("lock"), sewer: S.pathAvoidSewer && mapHas("sewer") };
-  const walkOrTrain = av => findPath(startId, endId, fly, false, av) || findPath(startId, endId, fly, true, av);
-  if (avoid.lock || avoid.sewer) {
-    const res = walkOrTrain(avoid);
-    if (res) return res;
+// No route with `opts`: every smallest set of extra allowances that gives one ([["lock"], ["sewer"]],
+// [["fly", "lock"]], ...), or null.
+export function routeHint(startId, endId, opts = {}) {
+  const off = ["fly", "lock", "sewer"].filter(k => !opts[k]);
+  const sets = [];
+  for (let n = 1; n <= off.length; n++)
+    (function pick(from, chosen) {
+      if (chosen.length === n) { sets.push(chosen); return; }
+      for (let i = from; i < off.length; i++) pick(i + 1, [...chosen, off[i]]);
+    })(0, []);
+  const found = [];
+  for (const extra of sets) {
+    if (found.length && extra.length > found[0].length) break;
+    const o = Object.assign({}, opts);
+    for (const k of extra) o[k] = true;
+    if (bestRoute(startId, endId, o)) found.push(extra);
   }
-  const res = walkOrTrain(null);
-  if (res && (avoid.lock || avoid.sewer)) {
-    const mid = res.rooms.slice(1, -1).map(id => S.map.rooms[id]);
-    res.through = {
-      lock: avoid.lock ? mid.filter(r => r.haven || r.lockable).length : 0,
-      sewer: avoid.sewer ? mid.filter(r => r.sewer).length : 0,
-    };
-  }
-  return res;
+  return found.length ? found : null;
 }
+const HINT_WORD = { fly: "✈ flight", lock: "🔒 lockable rooms", sewer: "🕳 sewers" };
+export function hintText(found) {
+  return found.map(extra => extra.map(k => HINT_WORD[k]).join(" and ")).join(", or with ");
+}
+const routeOpts = () => ({ fly: S.pathCanFly, lock: S.pathLock, sewer: S.pathSewer });
 // only offer a switch when the map has rooms it would matter for
 function mapHas(kind) {
   return Object.values(S.map.rooms).some(r => kind === "lock" ? r.haven || r.lockable : r.sewer);
 }
 export function computePath(startId, endId) {
   S.pathLast = { startId, endId };
-  const res = bestRoute(startId, endId, S.pathCanFly);
+  const res = bestRoute(startId, endId, routeOpts());
   const box = document.getElementById("pathResult");
   box.style.display = "block";
   const flyChk = `<label class="flychk"><input type="checkbox" id="pathFly"${S.pathCanFly ? " checked" : ""}> ✈ allow flight</label>` +
-    (mapHas("lock") ? ` <label class="flychk" title="Go around havens and lockable rooms when there's another way (fine as the destination)"><input type="checkbox" id="pathAvoidLock"${S.pathAvoidLock ? " checked" : ""}> 🔒 avoid lockable</label>` : "") +
-    (mapHas("sewer") ? ` <label class="flychk" title="Stay out of the sewers when there's another way"><input type="checkbox" id="pathAvoidSewer"${S.pathAvoidSewer ? " checked" : ""}> 🕳 avoid sewers</label>` : "");
+    (mapHas("lock") || S.pathLock ? ` <label class="flychk" title="Off: routes go around havens and lockable rooms (your start and destination may be one)"><input type="checkbox" id="pathLock"${S.pathLock ? " checked" : ""}> 🔒 through lockable</label>` : "") +
+    (mapHas("sewer") || S.pathSewer ? ` <label class="flychk" title="Off: routes stay out of the sewers (your start and destination may be one)"><input type="checkbox" id="pathSewer"${S.pathSewer ? " checked" : ""}> 🕳 through sewers</label>` : "");
   if (!res) {
     S.pathRooms = new Set();
+    const hint = routeHint(startId, endId, routeOpts());
     box.innerHTML = `<div><b>No ${S.pathCanFly ? "" : "ground "}route</b> from “${escapeHtml(roomName(startId))}” to “${escapeHtml(roomName(endId))}”.</div>` +
+      (hint ? `<div class="hint">There is one with ${escapeHtml(hintText(hint))}.</div>` : "") +
       `<div>${flyChk}</div>${reverseBtn(startId, endId)}<button id="pathClose">✕ close</button>`;
   } else {
     S.pathRooms = new Set(res.rooms);
@@ -189,7 +196,7 @@ export function computePath(startId, endId) {
       `<div><b>${escapeHtml(roomName(startId))}</b> → <b>${escapeHtml(roomName(endId))}</b> · ${res.steps.length} step${res.steps.length !== 1 ? "s" : ""}` +
         (flyCount ? ` · <span class="flystep" style="font-weight:700">${flyCount} flown</span>` : "") +
         (trainCount ? ` · <span class="trainstep" style="font-weight:700">${trainCount} train leg${trainCount !== 1 ? "s" : ""}</span>` : "") + `</div>` +
-      throughHtml(res) + dirsHtml + spacesHtml(res.rooms) + walkHtml(startId, res) +
+      dirsHtml + spacesHtml(res.rooms) + walkHtml(startId, res) +
       `<div>${flyChk}</div>` +
       reverseBtn(startId, endId) + `<button id="pathClose">✕ clear</button>`;
   }
@@ -202,9 +209,9 @@ export function computePath(startId, endId) {
   if (sb) sb.onclick = () => stopWalk("Stopped by you.");
   const fc = document.getElementById("pathFly");
   if (fc) fc.onchange = () => { S.pathCanFly = fc.checked; if (S.pathLast) computePath(S.pathLast.startId, S.pathLast.endId); };
-  for (const [id, key] of [["pathAvoidLock", "pathAvoidLock"], ["pathAvoidSewer", "pathAvoidSewer"]]) {
-    const el = document.getElementById(id);
-    if (el) el.onchange = () => { S[key] = el.checked; saveRoutePrefs(); if (S.pathLast) computePath(S.pathLast.startId, S.pathLast.endId); };
+  for (const key of ["pathLock", "pathSewer"]) {
+    const el = document.getElementById(key);
+    if (el) el.onchange = () => { S[key] = el.checked; if (S.pathLast) computePath(S.pathLast.startId, S.pathLast.endId); };
   }
   box.querySelectorAll(".pathleg").forEach(b => { b.onclick = () => gotoRoom(b.dataset.goto); });
   box.querySelectorAll(".pathcopy").forEach(b => {
@@ -225,19 +232,6 @@ function reverseBtn(startId, endId) {
   const from = reverseFrom(startId, endId);
   const where = from !== endId ? ` from where you are (${roomName(from)})` : ` from ${roomName(endId)}`;
   return `<button id="pathReverse" title="${escapeAttr("Route back to " + roomName(startId) + where)}">⇄ Reverse</button> `;
-}
-// no way around what you asked to avoid: say what the route goes through
-export function throughText(res) {
-  const t = res && res.through;
-  if (!t || !(t.lock || t.sewer)) return "";
-  const parts = [];
-  if (t.lock) parts.push(`${t.lock} lockable room${t.lock !== 1 ? "s" : ""}`);
-  if (t.sewer) parts.push(`${t.sewer} sewer room${t.sewer !== 1 ? "s" : ""}`);
-  return `No way around: goes through ${parts.join(" and ")}.`;
-}
-function throughHtml(res) {
-  const t = throughText(res);
-  return t ? `<div class="hint pathwarn">⚠ ${escapeHtml(t)}</div>` : "";
 }
 // "▶ Walk it" for the live link (live.js): types the route into the MUSH client 5 moves at a time.
 function walkHtml(startId, res) {

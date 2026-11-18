@@ -9,7 +9,7 @@ import { setSpace, toast, roomLocation } from "./spaces.js";
 import { positionPopover } from "./toolbar.js";
 import { gotoRoom } from "./inspector.js";
 import { stationLinesFor } from "./model.js";
-import { computePath, bestRoute, throughText } from "./search-path.js";
+import { computePath, bestRoute, routeHint } from "./search-path.js";
 import { addGhosts, ghostCount, dismissedCount, clearGhosts, resetDismissed } from "./ghosts.js";
 import { checkRoom, noteArrived, issueCount, issuesHtml, wireIssues, onIssuesChange } from "./issues.js";
 import { onGather, gatherHtml, mergeNightCounts } from "./gather.js";
@@ -86,7 +86,7 @@ function charState(name) {
     snap: null,         // last room snapshot from the side panel (bridge "room" message)
     riding: null,       // name of the train line aboard, from "You step aboard the ..."
     W: null,            // running walk: { steps:[{dir,toId}], sent, done, lastMove, timer, ... }
-    gotoList: [], gotoFly: false, gotoPreview: false,   // the last numbered //goto list
+    gotoList: [], gotoOpts: {}, gotoPreview: false,   // the last numbered //goto list
     clientAt: 0,        // last sign of life from this character's MUSH tab
     seenAt: 0,          // last game event this session
     via: "direct",      // "direct" (this browser's bridge) or "relay" (another device)
@@ -955,10 +955,13 @@ function matchRooms(q) {
   const words = fold(q).split(" ");
   return all.filter(r => { const n = fold(r.name); return words.every(w => n.includes(w)); });
 }
-// the route box's rules: walk-only first, trains only when there's no other way, around what it avoids
-function routeTo(fromId, toId, fly) {
-  return bestRoute(fromId, toId, fly);
+// the route box's rules: walk-only first, trains only when there's no other way; flight, lockable
+// rooms and sewers only when the //goto says so (opts {fly, lock, sewer})
+function routeTo(fromId, toId, opts) {
+  return bestRoute(fromId, toId, opts);
 }
+const GOTO_WORDS = ["fly", "lock", "sewer"];
+const gotoPrefix = opts => GOTO_WORDS.filter(k => opts[k]).map(k => k + " ").join("");
 // "south south | east · 🚆 Broad Street Line to Northbound Platform · east": walk steps in the
 // chains the walker would send, flown steps marked ✈, trains spelled out.
 function routeText(res) {
@@ -978,40 +981,41 @@ function routeText(res) {
 const GOTO_HELP = [
   "//goto <room> — walk there; every word you type must be in the room's name",
   "//goto fly <room> — also use flight exits (/stalk first)",
+  "//goto lock <room> — also go through havens and lockable rooms; //goto sewer <room> — through sewers (combine: //goto fly lock sewer <room>)",
   "//goto ? <room> — show the route without walking (also: //goto ? fly <room>)",
   "//goto <number> — pick from the last list",
   "//goto stop — stop walking (cancels a train wait or stop)",
   "//goto — where the mapper thinks you are",
 ];
 
-function gotoRoomFromGame(target, fly, preview = false) {
+function gotoRoomFromGame(target, opts, preview = false) {
   const here = hereRoom();
   if (!here) return reply("I don't know where you are yet. Move once, or press 📍 I'm here in the mapper.");
   if (here.id === target.id) return reply(`You're already in ${target.name}.`);
-  const res = routeTo(here.id, target.id, fly);
+  const res = routeTo(here.id, target.id, opts);
   if (!res) {
-    const byAir = !fly && routeTo(here.id, target.id, true);
-    return reply(`No ${fly ? "" : "ground "}route from ${here.name} to ${target.name} on your map.` +
-      (byAir ? ` There is one with flight: //goto fly ${target.name}` : ""));
+    const hint = routeHint(here.id, target.id, opts);
+    const ways = (hint || []).map(extra => `//goto ${gotoPrefix(Object.assign({}, opts, Object.fromEntries(extra.map(k => [k, true]))))}${target.name}`);
+    return reply(`No ${opts.fly ? "" : "ground "}route from ${here.name} to ${target.name} on your map.` +
+      (ways.length ? ` There is one with: ${ways.join(" or ")}` : ""));
   }
   const trains = res.steps.filter(s => s.type === "train");
   const walkSteps = res.steps.length - trains.length;
   const flown = res.steps.filter(s => s.fly).length;
-  S.pathCanFly = !!fly;              // the route box shows what's actually walked
+  S.pathCanFly = !!opts.fly; S.pathLock = !!opts.lock; S.pathSewer = !!opts.sewer;   // the route box shows what's actually walked
   computePath(here.id, target.id);   // show it in the mapper too
   const summary = `${walkSteps} step${walkSteps !== 1 ? "s" : ""}` + (flown ? ` (${flown} flown)` : "") +
     (trains.length ? ` and ${trains.map(t => "the " + t.lineName).join(", then ")}` : "");
-  const through = throughText(res);
   if (preview) {
     // "//goto 1" walks exactly this room, even when other rooms share its name
-    C.gotoList = [target.id]; C.gotoFly = !!fly; C.gotoPreview = false;
+    C.gotoList = [target.id]; C.gotoOpts = opts; C.gotoPreview = false;
     const unique = Object.values(S.map.rooms).filter(r => r.name === target.name).length === 1;
-    return reply(`Route to ${target.name}: ${summary}.` + (through ? " " + through : ""), routeText(res),
-      (unique ? `//goto ${fly ? "fly " : ""}${target.name} or ` : "") + "//goto 1 to walk it.");
+    return reply(`Route to ${target.name}: ${summary}.`, routeText(res),
+      (unique ? `//goto ${gotoPrefix(opts)}${target.name} or ` : "") + "//goto 1 to walk it.");
   }
   startWalk(res, true);
   if (!C.W) return reply("Couldn't start the walk. Is this the linked PbN tab?");
-  reply(`Walking to ${target.name}: ${summary}.` + (through ? " " + through : "") + " //goto stop to stop.");
+  reply(`Walking to ${target.name}: ${summary}. //goto stop to stop.`);
 }
 function onGoto(q) {
   if (!S.map) return;
@@ -1027,30 +1031,33 @@ function onGoto(q) {
   if (/^(help|\?)$/i.test(q)) return reply(...GOTO_HELP);
   if (/^\d+$/.test(q) && C.gotoList.length) {
     const r = S.map.rooms[C.gotoList[parseInt(q, 10) - 1]];
-    return r ? gotoRoomFromGame(r, C.gotoFly, C.gotoPreview) : reply(`Pick a number from 1 to ${C.gotoList.length}.`);
+    return r ? gotoRoomFromGame(r, C.gotoOpts, C.gotoPreview) : reply(`Pick a number from 1 to ${C.gotoList.length}.`);
   }
-  // Leading switches, in any order: "fly" allows flight exits, "?" previews without walking.
-  // Only the first of each counts, so a room starting with "fly" is "//goto fly fly trap".
-  let fly = false, preview = false, m;
-  while ((m = /^(fly|\?)(?:\s+|$)/i.exec(q))) {
-    const isFly = m[1].toLowerCase() === "fly";
-    if (isFly ? fly : preview) break;
-    if (isFly) fly = true; else preview = true;
+  // Leading switches, in any order: "fly" allows flight exits, "lock" lockable rooms, "sewer"
+  // sewers, "?" previews without walking. Only the first of each counts, so a room starting with
+  // "fly" is "//goto fly fly trap".
+  const opts = {};
+  let preview = false, m;
+  while ((m = /^(fly|lock|sewers?|\?)(?:\s+|$)/i.exec(q))) {
+    const w = m[1].toLowerCase().replace(/^sewers$/, "sewer");
+    if (w === "?" ? preview : opts[w]) break;
+    if (w === "?") preview = true; else opts[w] = true;
     q = q.slice(m[0].length).trim();
   }
-  if (!q) return reply(`Where to? //goto ${preview ? "? " : ""}${fly ? "fly " : ""}<room>`);
+  const fly = !!opts.fly;
+  if (!q) return reply(`Where to? //goto ${preview ? "? " : ""}${gotoPrefix(opts)}<room>`);
   const hits = matchRooms(q);
   if (!hits.length) return reply(`Nothing on your map matches "${q}".`);
-  if (hits.length === 1) return gotoRoomFromGame(hits[0], fly, preview);
+  if (hits.length === 1) return gotoRoomFromGame(hits[0], opts, preview);
   // several: nearest first, with where they are and how far, so duplicates can be told apart
   const here = hereRoom();
   const rows = hits.map(r => {
-    const res = here ? routeTo(here.id, r.id, fly) : null;
+    const res = here ? routeTo(here.id, r.id, opts) : null;
     return { r, steps: res ? res.steps.length : (here && here.id === r.id ? 0 : Infinity) };
   }).sort((a, b) => a.steps - b.steps || a.r.name.localeCompare(b.r.name));
   const shown = rows.slice(0, 8);
   C.gotoList = shown.map(x => x.r.id);
-  C.gotoFly = fly;
+  C.gotoOpts = opts;
   C.gotoPreview = preview;
   reply(`${hits.length} rooms match "${q}":`,
     ...shown.map((x, i) => `${i + 1}. ${x.r.name} · ${roomLocation(x.r)}` +

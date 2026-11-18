@@ -148,7 +148,6 @@ select { cursor: pointer; }
 .legendconv summary { cursor: pointer; }
 .legendconvrow { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 .legendconv select { flex: 1; min-width: 0; }
-.pathwarn { color: #e8c93a; }
 
 /* Compass + vertical carve rose */
 .rose { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }

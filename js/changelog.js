@@ -5,6 +5,19 @@
 // latest entry again; that's fine for patch notes.
 export const CHANGELOG = [
   {
+    id: "2026-11-route-around",
+    date: "2026-11-18",
+    title: "Routes go around lockable rooms and sewers",
+    html: `
+      <p>Routes now stay out of <b>🔒 havens and lockable rooms</b> and <b>🕳 sewers</b> by default, the same
+      way they leave out flight. Your start and destination may still be one.</p>
+      <ul>
+        <li>To go through them, tick <b>🔒 through lockable</b> or <b>🕳 through sewers</b> in the route box,
+        next to <b>✈ allow flight</b>. Like flight, these reset when you reload.</li>
+        <li>No route without them? The route box says which one would give you one.</li>
+      </ul>`,
+  },
+  {
     id: "2026-11-route-flags",
     date: "2026-11-13",
     title: "Route flags, Reverse, unexplored exits",
