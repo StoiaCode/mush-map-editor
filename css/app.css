@@ -483,6 +483,9 @@ select { cursor: pointer; }
 .livechar:hover { background: rgba(255,255,255,.04); }
 .livechar.on { border-color: rgba(61,220,132,.45); }
 .livechar .livesub { flex-basis: 100%; padding-left: 14px; margin: 0; }
+/* a long name wraps next to its dot, the dot stays on the first line */
+.livechar > b { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.livechar > .livedot { align-self: flex-start; margin-top: 5px; }
 .livedot { width: 8px; height: 8px; border-radius: 50%; background: #5a6372; flex: none; }
 .livedot.on { background: #3ddc84; }
 .relaycode { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
